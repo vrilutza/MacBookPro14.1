@@ -661,24 +661,25 @@ apt-get install -y --no-install-recommends mbpfan smartmontools
 
 cat > /etc/mbpfan.conf << 'EOF'
 [general]
-# MacBook Pro 13" 2017 (MacBookPro14,1) — very aggressive cooling profile
-# Tested on Ubuntu 26.04 with i5-7360U (15W TDP, Iris Plus 640)
+# MacBook Pro 13" 2017 (MacBookPro14,1) — maximum aggressive cooling profile
+# Always spinning at high baseline, reaches full speed early.
+# User preference: maximum cooling, noise is acceptable.
 
-# Fan speed limits (physical limits of this Mac's fan)
-min_fan1_speed = 3500
-max_fan1_speed = 6200
+# Fan speed limits (physical hardware limits of this Mac's fan: 1200-7200 RPM)
+min_fan1_speed = 4500   # always spinning fast — no silent idle
+max_fan1_speed = 6500   # just below hardware max (7200) for longevity
 
-# Temperature thresholds — aggressive: fan reaches max at 52°C
-low_temp  = 38       # fan starts ramping up above this (°C)
-high_temp = 46       # fan ramps up quickly above this
-max_temp  = 52       # fan at maximum above this
+# Temperature thresholds — very aggressive: ramp starts early, max at 48°C
+low_temp  = 30       # fan starts ramping above this (°C) — catches any workload
+high_temp = 40       # fan ramps up quickly above this
+max_temp  = 48       # fan at maximum above this (CPU rarely exceeds 70°C)
 
 # Polling interval in seconds
 polling_interval = 1
 EOF
 
 systemctl enable --now mbpfan
-log_ok "mbpfan fan control installed: min 3500 RPM, ramp starts at 38°C, max at 52°C."
+log_ok "mbpfan fan control installed: min 4500 RPM, ramp starts at 30°C, max at 48°C (max cooling)."
 log_info "Adjust thresholds at /etc/mbpfan.conf"
 
 # Enable smartd for SSD/NVMe temperature monitoring
@@ -1475,7 +1476,7 @@ echo -e "  ${GREEN}[✔]${NC}  3. WiFi — macOS NVRAM v2.5 + power save off"
 echo -e "  ${GREEN}[✔]${NC}  4. FaceTime HD Camera — driver attempted (see warnings above)"
 echo -e "  ${GREEN}[✔]${NC}  5. Thunderbolt 3 — bolt daemon"
 echo -e "  ${GREEN}[✔]${NC}  6. Battery & Thermal — TLP + thermald + RAPL PL1=15W/PL2=25W (time windows set)"
-echo -e "  ${GREEN}[✔]${NC}  7. applesmc — mbpfan (3500 RPM min, 38°C trigger), sensors, keyboard backlight (max)"
+echo -e "  ${GREEN}[✔]${NC}  7. applesmc — mbpfan (4500 RPM min, 30°C trigger, max at 48°C), sensors, keyboard backlight (max)"
 echo -e "  ${GREEN}[✔]${NC}  8. Touchpad — tap-to-click, natural scroll, PalmDetection, clickfinger"
 echo -e "  ${GREEN}[✔]${NC}  9. Screen brightness + s2idle suspend + auto-boot EFI disabled"
 echo -e "  ${GREEN}[✔]${NC} 10. System & Dev: ZRAM, sysctl, BBR TCP, NVMe I/O scheduler, earlyoom, ulimits"
