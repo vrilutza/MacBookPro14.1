@@ -1095,8 +1095,10 @@ log_ok "sysctl tuning applied: swappiness=10, inotify=524288, BBR TCP, dev file 
 # Applied via udev rule (persistent across reboots).
 cat > /etc/udev/rules.d/61-nvme-scheduler.rules << 'EOF'
 # MacBook Pro NVMe — use no scheduler (pass-through to NVMe internal queue)
-# NVMe hardware already reorders requests optimally — Linux scheduler just adds overhead
-ACTION=="add|change", KERNEL=="nvme[0-9]*", ATTR{queue/scheduler}="none"
+# NVMe hardware already reorders requests optimally — Linux scheduler just adds overhead.
+# ENV{DEVTYPE}=="disk" restricts the rule to block devices only (nvme0n1), excluding
+# partitions (nvme0n1p1...) which have no queue/scheduler attribute and would log errors.
+ACTION=="add|change", KERNEL=="nvme[0-9]*n[0-9]*", ENV{DEVTYPE}=="disk", ATTR{queue/scheduler}="none"
 EOF
 udevadm control --reload-rules
 # Apply immediately if NVMe block device exists (subshell suppresses /sys read-only error in containers)
