@@ -402,12 +402,14 @@ wifi.powersave = 2
 EOF
 log_ok "WiFi power save disabled persistently (NetworkManager)."
 
-# Disable brcmfmac power management via module option
+# Disable brcmfmac power management via module option.
+# Note: 'power_save' was removed in kernel 6.x; NetworkManager handles it via
+# wifi.powersave=2 above. 'roamoff=1' is still valid and prevents roaming drops.
 cat > /etc/modprobe.d/brcmfmac-macbook.conf << 'EOF'
 # MacBook Pro BCM4350 WiFi optimizations
-options brcmfmac power_save=0 roamoff=1
+options brcmfmac roamoff=1
 EOF
-log_ok "brcmfmac: power_save=0, roamoff=1 set."
+log_ok "brcmfmac: roamoff=1 set (power_save handled by NetworkManager)."
 
 # --- WiFi NVRAM: install macOS-extracted board-specific NVRAM calibration ---
 # The linux-firmware package ships a generic brcmfmac4350-pcie.bin (firmware binary).
@@ -425,7 +427,14 @@ if [ -f "$WIFI_NVRAM_DIR/brcmfmac4350-pcie.txt" ]; then
     # Generic fallback name
     cp "$WIFI_NVRAM_DIR/brcmfmac4350-pcie.txt" \
        "$BRCM_FW_DIR/brcmfmac4350-pcie.txt"
-    log_ok "WiFi NVRAM installed: macOS-calibrated board NVRAM for BCM4350 (boardid=0x170)"
+    # Kernel 6.6+ reports chip as brcmfmac4350c2-pcie (BCM4350 rev C2).
+    # Without these symlinks the Apple NVRAM is silently ignored and the
+    # generic firmware runs without board-specific RF calibration.
+    ln -sf "brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt" \
+        "$BRCM_FW_DIR/brcmfmac4350c2-pcie.Apple Inc.-MacBookPro14,1.txt" 2>/dev/null || true
+    ln -sf "brcmfmac4350-pcie.txt" \
+        "$BRCM_FW_DIR/brcmfmac4350c2-pcie.txt" 2>/dev/null || true
+    log_ok "WiFi NVRAM installed: macOS-calibrated board NVRAM for BCM4350/c2 (boardid=0x170)"
     log_info "Source: firmware/wifi/ (extracted from macOS Ventura, hawaii platform)"
 else
     log_warn "WiFi NVRAM not found at firmware/wifi/ — using linux-firmware default NVRAM."
