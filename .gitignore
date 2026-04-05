@@ -3,3 +3,4 @@ dkms.conf.orig
 tmp-deb/
 terminal.log
 *.log
+.claude/

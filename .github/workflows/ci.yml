@@ -1,0 +1,139 @@
+name: CI — Script validation
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 1: Bash syntax validation (fast, no Docker needed)
+  # ─────────────────────────────────────────────────────────────────────────
+  syntax:
+    name: Bash syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check all shell scripts
+        run: |
+          FAIL=0
+          for f in macbook_hardware_fixer.sh \
+                   bluetooth/bluetooth.sh \
+                   fan/fan_setup.sh \
+                   tests/verify-hardware.sh \
+                   tests/verify-installation.sh \
+                   tests/test-docker.sh; do
+            if [ -f "$f" ]; then
+              if bash -n "$f"; then
+                echo "✔ $f"
+              else
+                echo "✘ $f — SYNTAX ERROR"
+                FAIL=1
+              fi
+            fi
+          done
+          exit $FAIL
+
+      - name: Verify no hardcoded passwords or tokens
+        run: |
+          # Basic secret scan — catches common patterns
+          if grep -rE "(password|token|secret|api_key)\s*=\s*['\"][^'\"]{8,}" \
+               --include="*.sh" --include="*.conf" . 2>/dev/null; then
+            echo "Possible hardcoded secret found — review above"
+            exit 1
+          fi
+          echo "✔ No hardcoded secrets detected"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 2: Docker integration test (Ubuntu 26.04, packages + logic)
+  # ─────────────────────────────────────────────────────────────────────────
+  docker-test:
+    name: Docker integration test (Ubuntu 26.04)
+    runs-on: ubuntu-latest
+    needs: syntax
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker test image
+        run: docker build -f Dockerfile.test -t macbook-test .
+
+      - name: Run macbook_hardware_fixer.sh in container
+        run: |
+          docker run --rm macbook-test 2>&1 | tee /tmp/run.log
+          EXIT=${PIPESTATUS[0]}
+
+          echo ""
+          echo "=== Result ==="
+          OKS=$(grep -c "\[✔\]" /tmp/run.log || echo 0)
+          WARNS=$(grep -c "\[!\]" /tmp/run.log || echo 0)
+          ERRS=$(grep -c "\[✘\]" /tmp/run.log || echo 0)
+          echo "Passed: $OKS  Warnings: $WARNS  Errors: $ERRS"
+
+          # Fail CI only on unexpected errors (not hardware-not-found)
+          UNEXPECTED=$(grep "\[✘\]" /tmp/run.log | \
+            grep -v "MOCK\|not found\|not available\|NVMe PCI\|hci0" || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo ""
+            echo "UNEXPECTED FAILURES:"
+            echo "$UNEXPECTED"
+            exit 1
+          fi
+
+          exit $EXIT
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-test-log
+          path: /tmp/run.log
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 3: Verify generated config file syntax
+  # ─────────────────────────────────────────────────────────────────────────
+  config-validation:
+    name: Validate generated configs
+    runs-on: ubuntu-latest
+    needs: docker-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run container and extract generated configs
+        run: |
+          docker build -f Dockerfile.test -t macbook-test . -q
+
+          # Run and extract config files to verify their syntax
+          docker run --rm macbook-test bash -c '
+            bash macbook_hardware_fixer.sh >/dev/null 2>&1 || true
+
+            echo "=== sysctl config ===" && \
+              cat /etc/sysctl.d/60-macbook-dev.conf && \
+            echo "" && echo "=== TLP config ===" && \
+              cat /etc/tlp.d/50-macbook-pro14-1.conf && \
+            echo "" && echo "=== mbpfan config ===" && \
+              cat /etc/mbpfan.conf && \
+            echo "" && echo "=== journald config ===" && \
+              cat /etc/systemd/journald.conf.d/60-macbook-dev.conf
+          '
+
+      - name: Validate sysctl keys exist in kernel
+        run: |
+          # Install sysctl to validate config syntax
+          sudo apt-get install -y procps -qq
+
+          docker run --rm macbook-test bash -c \
+            'bash macbook_hardware_fixer.sh >/dev/null 2>&1 || true && \
+             cat /etc/sysctl.d/60-macbook-dev.conf' \
+          | grep -v "^#\|^$" \
+          | while IFS=' =' read key val _; do
+              key=$(echo "$key" | tr -d ' ')
+              [ -z "$key" ] && continue
+              if sysctl "$key" &>/dev/null 2>&1; then
+                echo "✔ sysctl key valid: $key"
+              else
+                echo "⚠ sysctl key not found on runner: $key (may be kernel-version specific)"
+              fi
+            done

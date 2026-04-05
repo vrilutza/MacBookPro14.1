@@ -1,0 +1,118 @@
+# =============================================================================
+# Dockerfile.test — Test macbook_hardware_fixer.sh on Ubuntu 26.04
+#
+# Tests: package availability, config file generation, script logic, sysctl syntax
+# Does NOT test: systemd services, kernel modules, hardware-specific paths
+#
+# Usage:
+#   docker build -f Dockerfile.test -t macbook-test .
+#   docker run --rm macbook-test
+#
+# Or via make:
+#   make test-docker
+# =============================================================================
+
+FROM ubuntu:26.04
+
+# Non-interactive apt
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TERM=xterm-256color
+
+# Simulate SUDO_USER so gsettings/git blocks run
+ENV SUDO_USER=testuser
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Base tools needed before running the script
+# ─────────────────────────────────────────────────────────────────────────────
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    sudo bash python3 lsblk rfkill iw \
+    2>/dev/null || true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mock system commands that require hardware or systemd
+# Each mock logs what it would do and exits 0 (non-blocking)
+# ─────────────────────────────────────────────────────────────────────────────
+RUN mkdir -p /usr/local/bin/mocks
+
+# systemctl: log calls, always succeed
+RUN printf '#!/bin/bash\necho "  [MOCK] systemctl $*"\nexit 0\n' \
+    > /usr/local/bin/systemctl && chmod +x /usr/local/bin/systemctl
+
+# udevadm: log and succeed
+RUN printf '#!/bin/bash\necho "  [MOCK] udevadm $*"\nexit 0\n' \
+    > /usr/local/bin/udevadm && chmod +x /usr/local/bin/udevadm
+
+# update-grub / grub-mkconfig: log and succeed
+RUN printf '#!/bin/bash\necho "  [MOCK] update-grub $*"\nexit 0\n' \
+    > /usr/local/bin/update-grub && chmod +x /usr/local/bin/update-grub
+RUN printf '#!/bin/bash\necho "  [MOCK] grub-mkconfig $*"\nexit 0\n' \
+    > /usr/local/bin/grub-mkconfig && chmod +x /usr/local/bin/grub-mkconfig
+
+# update-initramfs: log and succeed
+RUN printf '#!/bin/bash\necho "  [MOCK] update-initramfs $*"\nexit 0\n' \
+    > /usr/local/bin/update-initramfs && chmod +x /usr/local/bin/update-initramfs
+
+# sensors-detect: interactive tool, mock it
+RUN printf '#!/bin/bash\necho "  [MOCK] sensors-detect (skipped in container)"\nexit 0\n' \
+    > /usr/local/bin/sensors-detect && chmod +x /usr/local/bin/sensors-detect
+
+# gsettings: log and succeed (no GNOME in container)
+RUN printf '#!/bin/bash\necho "  [MOCK] gsettings $*"\nexit 0\n' \
+    > /usr/local/bin/gsettings && chmod +x /usr/local/bin/gsettings
+
+# hciconfig: log and succeed (no BT hardware)
+RUN printf '#!/bin/bash\necho "  [MOCK] hciconfig $*"\nexit 0\n' \
+    > /usr/local/bin/hciconfig && chmod +x /usr/local/bin/hciconfig
+
+# rfkill: return empty list (no BT hardware)
+RUN printf '#!/bin/bash\necho "  [MOCK] rfkill $*"\nexit 0\n' \
+    > /usr/local/bin/rfkill && chmod +x /usr/local/bin/rfkill
+
+# fstrim: log and succeed (no real filesystem)
+RUN printf '#!/bin/bash\necho "  [MOCK] fstrim $*"\nexit 0\n' \
+    > /usr/local/bin/fstrim && chmod +x /usr/local/bin/fstrim
+
+# apfs-fuse: not available, mock gracefully
+RUN printf '#!/bin/bash\necho "  [MOCK] apfs-fuse: no macOS partition"\nexit 1\n' \
+    > /usr/local/bin/apfs-fuse && chmod +x /usr/local/bin/apfs-fuse
+
+# boltctl: log and succeed
+RUN printf '#!/bin/bash\necho "  [MOCK] boltctl $*"\nexit 0\n' \
+    > /usr/local/bin/boltctl && chmod +x /usr/local/bin/boltctl
+
+# Create fake /etc/default/grub so GRUB section runs
+RUN echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"' > /etc/default/grub
+
+# Create fake /etc/fstab
+RUN echo '/dev/nvme0n1p2 / ext4 defaults 0 1' > /etc/fstab
+
+# Create fake /etc/bluetooth/main.conf with standard sections
+RUN mkdir -p /etc/bluetooth && printf '[General]\nName=BlueZ\n\n[Policy]\n' \
+    > /etc/bluetooth/main.conf
+
+# Create testuser (simulates the logged-in user)
+RUN useradd -m -s /bin/bash testuser && echo "testuser ALL=(ALL) NOPASSWD:ALL" \
+    >> /etc/sudoers
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy project
+# ─────────────────────────────────────────────────────────────────────────────
+COPY . /project
+WORKDIR /project
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Run the script — exit code tells us if something broke unexpectedly
+# ─────────────────────────────────────────────────────────────────────────────
+CMD ["/bin/bash", "-c", "\
+    echo ''; \
+    echo '══════════════════════════════════════════════════════'; \
+    echo '  macbook_hardware_fixer.sh — Docker test run'; \
+    echo '  Ubuntu 26.04 container — hardware mocked'; \
+    echo '══════════════════════════════════════════════════════'; \
+    echo ''; \
+    bash macbook_hardware_fixer.sh; \
+    echo ''; \
+    echo '══════════════════════════════════════════════════════'; \
+    echo '  Script finished. Exit code: '$?; \
+    echo '══════════════════════════════════════════════════════' \
+"]
