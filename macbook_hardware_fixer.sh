@@ -1295,13 +1295,16 @@ fi
 # Find the built-in display device ID.
 # colord names it after the X/Wayland output name. On MacBook Pro 14,1 the
 # internal eDP link appears as 'eDP-1' (Wayland/KMS) or 'LVDS-1' (old X11).
-# We match 'eDP' first, fall back to first display device in the list.
+# NOTE: 'Model: Color LCD' appears BEFORE 'Device ID:' in colormgr output, so
+# we must extract Device ID lines directly with sed (not awk look-ahead).
+# The Device ID contains spaces, so $NF would only capture the last word.
 DEVICE_ID=$(colormgr get-devices 2>/dev/null \
-    | awk '/Device ID:/{id=$NF} /eDP|Color LCD|Built-in/{print id; exit}')
+    | sed -n 's/^[[:space:]]*Device ID:[[:space:]]*//p' \
+    | grep -i "edp\|color.lcd\|apple" | head -1)
 
 if [ -z "$DEVICE_ID" ]; then
     DEVICE_ID=$(colormgr get-devices 2>/dev/null \
-        | awk '/Device ID:/{print $NF; exit}')
+        | sed -n 's/^[[:space:]]*Device ID:[[:space:]]*//p' | head -1)
 fi
 
 if [ -z "$DEVICE_ID" ]; then
@@ -1309,8 +1312,10 @@ if [ -z "$DEVICE_ID" ]; then
     exit 1
 fi
 
+# Find profile by name — Filename appears BEFORE Profile ID in colormgr output,
+# so we set a flag when we see the name, then capture the next Profile ID line.
 PROFILE_ID=$(colormgr get-profiles 2>/dev/null \
-    | awk "/Profile ID:/{id=\$NF} /$PROFILE_NAME/{print id; exit}")
+    | awk "/$PROFILE_NAME/ { found=1 } found && /Profile ID:/ { print \$NF; exit }")
 
 if [ -z "$PROFILE_ID" ]; then
     echo "macbook-color-profile: profile not found in colord after import" >&2
@@ -1376,7 +1381,7 @@ temp-day=6500
 temp-night=4000
 gamma=1.0
 fade=1
-adjustment-method=randr
+adjustment-method=drm
 location-provider=manual
 
 [manual]
@@ -1387,6 +1392,15 @@ lon=26.1
 EOF
     log_ok "redshift config: 6500K day, 4000K night (matches macOS Night Shift defaults)."
     log_info "Edit /etc/xdg/redshift.conf to change your latitude/longitude."
+
+    # Also write per-user config — on GNOME/Wayland, XDG_CONFIG_DIRS may not
+    # include /etc/xdg at session startup, so the system-wide file is skipped.
+    # ~/.config/redshift.conf is always read by redshift/redshift-gtk.
+    if [ -n "$REAL_HOME" ]; then
+        mkdir -p "$REAL_HOME/.config"
+        cp /etc/xdg/redshift.conf "$REAL_HOME/.config/redshift.conf"
+        chown "$REAL_USER:$REAL_USER" "$REAL_HOME/.config/redshift.conf"
+    fi
 
     # Autostart for the desktop user
     if [ -n "$REAL_HOME" ]; then

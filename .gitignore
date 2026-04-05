@@ -3,4 +3,7 @@ dkms.conf.orig
 tmp-deb/
 terminal.log
 *.log
+*.png
+.DS_Store
+plan.rtf
 .claude/

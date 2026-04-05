@@ -139,6 +139,9 @@ if [ ! -e /usr/src/linux-source-$kernel_version.tar.bz2 ]; then
 
     echo "Extracting kernel sound/hda source..."
     dpkg-deb -x *.deb .
+    # Cache tarball so subsequent runs skip the 193MB download
+    cp usr/src/linux-source-*/linux-source-*.tar.bz2 \
+        /usr/src/linux-source-$kernel_version.tar.bz2 2>/dev/null || true
     tar --strip-components=2 -xvf usr/src/linux-source-*/linux-source-*.tar.bz2 \
         --directory="$cur_dir/$build_dir" linux-source-$kernel_version/sound/hda
 
