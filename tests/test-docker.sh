@@ -43,7 +43,8 @@ echo ""
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "${BOLD}${BLUE}>>> Syntax checks${NC}"
 
-for script in macbook_hardware_fixer.sh bluetooth/bluetooth.sh fan/fan_setup.sh \
+for script in macbook_hardware_fixer.sh bluetooth/bluetooth.sh \
+              fan/monitor_macfan_extreme.sh fan/hardware.sh \
               tests/verify-hardware.sh tests/verify-installation.sh; do
     if [ -f "$script" ]; then
         if bash -n "$script" 2>/dev/null; then
@@ -119,21 +120,20 @@ echo ""
 RUN_LOG="/tmp/macbook-docker-test.log"
 RUN_START=$(date +%s)
 
-if docker run --rm "$IMAGE" 2>&1 | tee "$RUN_LOG"; then
-    RUN_EXIT=${PIPESTATUS[0]}
-else
-    RUN_EXIT=$?
-fi
+docker run --rm "$IMAGE" 2>&1 | tee "$RUN_LOG" || true
+RUN_EXIT=${PIPESTATUS[0]}
 
 RUN_END=$(date +%s)
 echo ""
 echo -e "${BOLD}${BLUE}>>> Test analysis${NC}"
 
-# Count real failures vs expected mock messages
-REAL_ERRORS=$(grep -c "^\s*\[✘\]" "$RUN_LOG" 2>/dev/null || echo 0)
-REAL_WARNS=$(grep -c "^\s*\[!\]" "$RUN_LOG" 2>/dev/null || echo 0)
-REAL_OKS=$(grep -c "^\s*\[✔\]" "$RUN_LOG" 2>/dev/null || echo 0)
-MOCK_CALLS=$(grep -c "\[MOCK\]" "$RUN_LOG" 2>/dev/null || echo 0)
+# Count real failures vs expected mock messages.
+# Use { grep || true; } | wc -l so 0 matches doesn't propagate grep's exit 1
+# through pipefail and kill the script.
+REAL_ERRORS=$( { grep -F "[✘]" "$RUN_LOG" 2>/dev/null || true; } | wc -l )
+REAL_WARNS=$(  { grep -F "[!]" "$RUN_LOG" 2>/dev/null || true; } | wc -l )
+REAL_OKS=$(    { grep -F "[✔]" "$RUN_LOG" 2>/dev/null || true; } | wc -l )
+MOCK_CALLS=$(  { grep -F "[MOCK]" "$RUN_LOG" 2>/dev/null || true; } | wc -l )
 
 info "Run time: $((RUN_END - RUN_START))s"
 info "Script exit code: $RUN_EXIT"
@@ -143,7 +143,7 @@ echo -e "  ${RED}[✘]${NC} Errors:  $REAL_ERRORS"
 info "Mocked hardware calls: $MOCK_CALLS"
 
 # Show only real errors (not hardware-not-found warnings which are expected)
-UNEXPECTED=$(grep -E "^\s*\[✘\]" "$RUN_LOG" | grep -v "MOCK\|not found\|not available\|failed.*not\|NVMe PCI" || true)
+UNEXPECTED=$(grep -E "\[✘\]" "$RUN_LOG" | grep -v "MOCK\|not found\|not available\|failed.*not\|NVMe PCI" || true)
 if [ -n "$UNEXPECTED" ]; then
     echo ""
     echo -e "${RED}${BOLD}Unexpected failures:${NC}"

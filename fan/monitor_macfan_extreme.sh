@@ -5,9 +5,9 @@
 set -e
 
 # Limite din mbpfan.conf
-LOW_TEMP=40
-HIGH_TEMP=50
-MAX_TEMP=55
+LOW_TEMP=38
+HIGH_TEMP=46
+MAX_TEMP=52
 
 blink_on="\e[41;97m"   # roșu fundal + text alb
 blink_off="\e[0m"

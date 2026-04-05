@@ -3,9 +3,8 @@
 # =============================================================================
 # MacBook Pro Hardware Verifier
 # Checks that macbook_hardware_fixer.sh was applied correctly.
-# Covers all 9 steps: GPU, Bluetooth, WiFi, Camera, Thunderbolt,
-# Battery/Thermal, applesmc, Touchpad/Keyboard, Brightness/Suspend.
-# Audio (Cirrus CS8409) is verified by verify-installation.sh (called at end).
+# Covers all 10 steps (0-10): Audio/CS8409, GPU, Bluetooth, WiFi, Camera,
+# Thunderbolt, Battery/Thermal, applesmc, Touchpad/Keyboard, Brightness/Suspend.
 #
 # Usage: ./verify-hardware.sh [--help] [--root-only]
 # No root required for most checks; run as root for full Bluetooth config check.
@@ -36,19 +35,20 @@ if [[ "${1}" == "-h" || "${1}" == "--help" ]]; then
 Usage: $0 [--help]
 
 Verifies that macbook_hardware_fixer.sh was correctly applied on this system.
-Checks all 9 hardware steps, then calls verify-installation.sh for audio.
+Checks all 10 hardware steps (0-10).
 
 Steps verified:
-  [1/9] Intel Iris Plus 640  — VA-API packages + i915 driver
-  [2/9] Bluetooth BCM4350C0  — firmware, hci0 status, bluez config, WirePlumber
-  [3/9] WiFi BCM4350         — brcmfmac module, power save config
-  [4/9] FaceTime HD Camera   — facetimehd module + firmware + /dev/video device
-  [5/9] Thunderbolt 3        — bolt service
-  [6/9] Battery & Thermal    — TLP + thermald services
-  [7/9] applesmc             — fan, temperature sensors, keyboard backlight
-  [8/9] Touchpad & Keyboard  — libinput config, hid_apple fnmode
-  [9/9] Brightness + Suspend — brightnessctl, s2idle GRUB, NVMe d3cold service
-  [+]   Audio (CS8409)       — delegates to verify-installation.sh
+  [0/10] Cirrus CS8409 Audio  — .ko module file + lsmod
+  [1/10] Intel Iris Plus 640  — VA-API packages + i915 driver
+  [2/10] Bluetooth BCM4350C0  — firmware, hci0 status, bluez config, WirePlumber
+  [3/10] WiFi BCM4350         — brcmfmac module, power save config
+  [4/10] FaceTime HD Camera   — facetimehd module + firmware + /dev/video device
+  [5/10] Thunderbolt 3        — bolt service
+  [6/10] Battery & Thermal    — TLP + thermald services
+  [7/10] applesmc             — fan, temperature sensors, keyboard backlight
+  [8/10] Touchpad & Keyboard  — libinput config, hid_apple fnmode
+  [9/10] Brightness + Suspend — brightnessctl, s2idle GRUB, NVMe d3cold service
+  [10/10] System optimizations — ZRAM, BBR, NVMe scheduler, earlyoom
 
 Exit codes:
   0 — all checks passed (warnings are informational only)
@@ -75,9 +75,27 @@ echo "============================================================"
 echo -e "${NC}"
 
 # =============================================================================
+# STEP 0 — Cirrus Logic CS8409 — HDA Audio Driver
+# =============================================================================
+step "0/10 — Cirrus Logic CS8409 — HDA audio driver"
+
+KO_PATH=$(find /lib/modules/"$KERNEL"/updates -name "snd-hda-codec-cs8409.ko*" 2>/dev/null | head -1)
+if [ -n "$KO_PATH" ]; then
+    pass "Cirrus CS8409 driver installed: $KO_PATH"
+else
+    fail "Cirrus CS8409 .ko not found in /lib/modules/$KERNEL/updates/ — run: sudo bash macbook_hardware_fixer.sh"
+fi
+
+if lsmod | grep -q "snd_hda_codec_cs8409"; then
+    pass "snd_hda_codec_cs8409 module loaded (audio active)"
+else
+    warn "snd_hda_codec_cs8409 not loaded — may need reboot after first install"
+fi
+
+# =============================================================================
 # STEP 1 — Intel Iris Plus 640 — VA-API
 # =============================================================================
-step "1/9 — Intel Iris Plus 640 GPU — VA-API"
+step "1/10 — Intel Iris Plus 640 GPU — VA-API"
 
 if dpkg -l intel-media-va-driver &>/dev/null 2>&1; then
     pass "intel-media-va-driver installed (Gen 9 / Kaby Lake VA-API)"
@@ -112,7 +130,7 @@ fi
 # =============================================================================
 # STEP 2 — Bluetooth BCM4350C0
 # =============================================================================
-step "2/9 — Bluetooth BCM4350C0 UART"
+step "2/10 — Bluetooth BCM4350C0 UART"
 
 BT_FW="/lib/firmware/brcm/BCM4350C0.hcd"
 BT_FW_OLD="/lib/firmware/brcm/BCM2E7C.hcd"
@@ -132,6 +150,29 @@ fi
 
 if [ -d /sys/class/bluetooth/hci0 ]; then
     pass "hci0 Bluetooth interface present in sysfs"
+
+    # Check for baud rate mismatch — the most common failure on MacBook Pro
+    # Symptom: hci0 exists but BD Address = 00:00:00:00:00:00 and state is DOWN
+    HCI_ADDR=$(hciconfig hci0 2>/dev/null | grep "BD Address" | awk '{print $3}')
+    HCI_STATE=$(hciconfig hci0 2>/dev/null | grep -oE "UP|DOWN" | head -1)
+    if [ "$HCI_ADDR" = "00:00:00:00:00:00" ]; then
+        fail "hci0 BD Address is 00:00:00:00:00:00 — BCM4350C0 baud rate mismatch"
+        info "The chip is running at 3 Mbaud (set by a previous Linux session)."
+        info "Linux tries 115200 → all commands time out → hci0 stays DOWN."
+        info ""
+        info "FIX — SMC Reset (resets chip to factory 115200 baud):"
+        info "  1. Shutdown completely (NOT restart — chip must lose power)"
+        info "  2. Hold 10 sec: Shift(L) + Ctrl(L) + Option(L) + Power"
+        info "  3. Release, press Power to boot normally"
+        info ""
+        info "After SMC Reset Bluetooth will work on every subsequent boot."
+    elif [ "$HCI_STATE" = "DOWN" ]; then
+        fail "hci0 is DOWN — Bluetooth interface not active"
+        info "Try: sudo hciconfig hci0 up"
+    else
+        pass "hci0 is UP — BD Address: $HCI_ADDR"
+    fi
+
     # rfkill check (no root needed)
     if rfkill list bluetooth 2>/dev/null | grep -q "Soft blocked: yes"; then
         fail "Bluetooth is rfkill soft-blocked — run: rfkill unblock bluetooth"
@@ -183,7 +224,7 @@ fi
 # =============================================================================
 # STEP 3 — WiFi BCM4350
 # =============================================================================
-step "3/9 — WiFi BCM4350 — brcmfmac"
+step "3/10 — WiFi BCM4350 — brcmfmac"
 
 if lsmod | grep -q "^brcmfmac "; then
     pass "brcmfmac module loaded"
@@ -216,7 +257,7 @@ fi
 # =============================================================================
 # STEP 4 — FaceTime HD Camera
 # =============================================================================
-step "4/9 — FaceTime HD Camera — facetimehd"
+step "4/10 — FaceTime HD Camera — facetimehd"
 
 if lsmod | grep -q "^facetimehd "; then
     pass "facetimehd kernel module loaded"
@@ -243,7 +284,7 @@ fi
 # =============================================================================
 # STEP 5 — Thunderbolt 3
 # =============================================================================
-step "5/9 — Thunderbolt 3 — bolt"
+step "5/10 — Thunderbolt 3 — bolt"
 
 if command -v boltctl &>/dev/null; then
     pass "bolt installed (boltctl available)"
@@ -260,7 +301,7 @@ fi
 # =============================================================================
 # STEP 6 — Battery & Thermal
 # =============================================================================
-step "6/9 — Battery & Thermal — TLP + thermald"
+step "6/10 — Battery & Thermal — TLP + thermald"
 
 if systemctl is-active tlp &>/dev/null 2>&1; then
     pass "TLP battery management service is active"
@@ -357,7 +398,7 @@ fi
 # =============================================================================
 # STEP 7 — applesmc: Fan, Sensors, Keyboard Backlight
 # =============================================================================
-step "7/9 — applesmc: Fan / Sensors / Keyboard Backlight"
+step "7/10 — applesmc: Fan / Sensors / Keyboard Backlight"
 
 if lsmod | grep -q "^applesmc "; then
     pass "applesmc kernel module loaded"
@@ -400,8 +441,8 @@ if systemctl is-active mbpfan &>/dev/null 2>&1; then
     pass "mbpfan fan daemon is active"
     # Verify aggressive cooling profile is applied
     if [ -f /etc/mbpfan.conf ]; then
-        MIN_SPEED=$(grep -E "^min_fan1_speed" /etc/mbpfan.conf 2>/dev/null | awk -F= '{gsub(/ /,"",$2); print $2}')
-        LOW_T=$(grep -E "^low_temp" /etc/mbpfan.conf 2>/dev/null | awk -F= '{gsub(/[^0-9]/,"",$2); print $2}')
+        MIN_SPEED=$(grep -E "^min_fan1_speed" /etc/mbpfan.conf 2>/dev/null | awk -F= '{sub(/#.*/,"",$2); gsub(/ /,"",$2); print int($2)}')
+        LOW_T=$(grep -E "^low_temp" /etc/mbpfan.conf 2>/dev/null | awk -F= '{sub(/#.*/,"",$2); gsub(/ /,"",$2); print int($2)}')
         if [ "${MIN_SPEED:-0}" -ge 3000 ] 2>/dev/null; then
             pass "mbpfan: min_fan1_speed=${MIN_SPEED} RPM (aggressive profile)"
         else
@@ -426,7 +467,7 @@ fi
 # =============================================================================
 # STEP 8 — Touchpad & Keyboard
 # =============================================================================
-step "8/9 — Touchpad & Keyboard — libinput"
+step "8/10 — Touchpad & Keyboard — libinput"
 
 LIBINPUT_CONF="/usr/share/X11/xorg.conf.d/40-macbook-libinput.conf"
 if [ -f "$LIBINPUT_CONF" ]; then
@@ -459,10 +500,35 @@ else
     info "hid_apple fnmode sysfs not found (module may not be loaded)"
 fi
 
+# HiDPI scaling (GNOME, only checkable as the real user)
+if [ -n "${SUDO_USER:-}" ]; then
+    _SCALE=$(sudo -u "$SUDO_USER" gsettings get org.gnome.desktop.interface scaling-factor 2>/dev/null || echo "0")
+    if [ "$_SCALE" = "uint32 2" ]; then
+        pass "HiDPI: scaling-factor=2 set (2560×1600 Retina display correct)"
+    else
+        warn "HiDPI: scaling-factor=$_SCALE (expected 2 for MacBook Pro Retina)"
+        info "Fix: run macbook_hardware_fixer.sh (step 8 sets scaling-factor=2)"
+    fi
+    _PBUTTON=$(sudo -u "$SUDO_USER" gsettings get org.gnome.settings-daemon.plugins.power power-button-action 2>/dev/null || echo "?")
+    if [ "$_PBUTTON" = "'suspend'" ]; then
+        pass "GNOME power-button-action=suspend (not shutdown dialog)"
+    else
+        warn "GNOME power-button-action=$_PBUTTON (expected 'suspend')"
+    fi
+    _LID=$(sudo -u "$SUDO_USER" gsettings get org.gnome.settings-daemon.plugins.power lid-close-battery-action 2>/dev/null || echo "?")
+    if [ "$_LID" = "'suspend'" ]; then
+        pass "GNOME lid-close-battery-action=suspend"
+    else
+        warn "GNOME lid-close=battery=$_LID (expected 'suspend')"
+    fi
+else
+    info "HiDPI + GNOME power checks skipped (requires sudo — run: sudo $0)"
+fi
+
 # =============================================================================
 # STEP 9 — Screen Brightness + Suspend/Sleep
 # =============================================================================
-step "9/9 — Screen Brightness + Suspend/Sleep"
+step "9/10 — Screen Brightness + Suspend/Sleep"
 
 if command -v brightnessctl &>/dev/null; then
     pass "brightnessctl installed"
@@ -509,11 +575,141 @@ else
 fi
 
 # =============================================================================
+# STEP 10 — System & Development optimizations
+# =============================================================================
+step "10/10 — System & Development optimizations"
+
+# ZRAM
+if zramctl 2>/dev/null | grep -q "^/dev/zram"; then
+    pass "ZRAM swap active (compressed RAM swap)"
+    ZRAM_INFO=$(zramctl --noheadings --output NAME,SIZE,USED,COMP 2>/dev/null | head -1)
+    info "ZRAM: $ZRAM_INFO"
+elif [ -f /etc/systemd/zram-generator.conf ]; then
+    warn "ZRAM config present but no /dev/zram device active — takes effect after reboot"
+else
+    warn "ZRAM not configured — system may freeze under heavy build load"
+    info "Fix: run macbook_hardware_fixer.sh (step 10 configures ZRAM)"
+fi
+
+# sysctl: inotify (critical for IDEs)
+INOTIFY=$(sysctl -n fs.inotify.max_user_watches 2>/dev/null || echo 0)
+if [ "$INOTIFY" -ge 524288 ] 2>/dev/null; then
+    pass "fs.inotify.max_user_watches=$INOTIFY (IDE file watchers: OK)"
+else
+    fail "fs.inotify.max_user_watches=$INOTIFY (too low — VSCode/IntelliJ may fail)"
+    info "Fix: run macbook_hardware_fixer.sh or: sysctl -w fs.inotify.max_user_watches=524288"
+fi
+
+# sysctl: swappiness
+SWAPPINESS=$(sysctl -n vm.swappiness 2>/dev/null || echo 60)
+if [ "$SWAPPINESS" -le 15 ] 2>/dev/null; then
+    pass "vm.swappiness=$SWAPPINESS (RAM-preferring — good for dev)"
+else
+    warn "vm.swappiness=$SWAPPINESS (high — system may swap too eagerly; expected ≤15)"
+fi
+
+# BBR TCP
+BBR=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)
+if [ "$BBR" = "bbr" ]; then
+    pass "TCP congestion control: BBR (better WiFi throughput)"
+else
+    warn "TCP congestion control: $BBR (expected bbr for better download performance)"
+fi
+
+# I/O scheduler for NVMe
+NVME_SCHED=""
+for f in /sys/block/nvme*/queue/scheduler; do
+    [ -f "$f" ] && NVME_SCHED=$(cat "$f" 2>/dev/null) && break
+done
+if echo "$NVME_SCHED" | grep -q "\[none\]"; then
+    pass "NVMe I/O scheduler: none (pass-through, lowest latency)"
+elif [ -f /etc/udev/rules.d/61-nvme-scheduler.rules ]; then
+    warn "NVMe scheduler udev rule present but not active yet (takes effect after reboot)"
+else
+    warn "NVMe I/O scheduler: ${NVME_SCHED:-unknown} (expected 'none' for lowest latency)"
+fi
+
+# earlyoom
+if systemctl is-active earlyoom &>/dev/null 2>&1; then
+    pass "earlyoom active — prevents system freeze under memory pressure"
+else
+    warn "earlyoom not running — risk of system freeze during heavy builds"
+    info "Fix: run macbook_hardware_fixer.sh (step 10 installs earlyoom)"
+fi
+
+# ulimits
+NOFILE=$(ulimit -n 2>/dev/null || echo 0)
+if [ "$NOFILE" -ge 65536 ] 2>/dev/null; then
+    pass "Open file limit: $NOFILE (sufficient for Node.js / JVM / Docker)"
+else
+    warn "Open file limit: $NOFILE (low — may cause issues with Node.js or Docker)"
+fi
+
+# i915 FBC + PSR
+if [ -f /etc/modprobe.d/i915-macbook.conf ] && grep -q "enable_fbc=1" /etc/modprobe.d/i915-macbook.conf; then
+    pass "i915: FBC + PSR enabled (GPU power optimisations)"
+    # Check if actually active in current session
+    FBC=$(cat /sys/kernel/debug/dri/0/i915_fbc_status 2>/dev/null | head -1 || echo "n/a")
+    [ "$FBC" != "n/a" ] && info "i915 FBC status: $FBC"
+else
+    warn "i915 FBC/PSR not configured — GPU using more power than necessary"
+fi
+
+# fstrim.timer (NVMe TRIM)
+if systemctl is-enabled fstrim.timer &>/dev/null 2>&1; then
+    pass "fstrim.timer enabled — weekly NVMe TRIM active"
+    LAST_TRIM=$(systemctl status fstrim.service 2>/dev/null | grep "Exec Start" | head -1 || echo "")
+    [ -n "$LAST_TRIM" ] && info "Last TRIM: $LAST_TRIM"
+else
+    warn "fstrim.timer NOT enabled — NVMe performance degrades over time"
+    info "Fix: sudo systemctl enable --now fstrim.timer"
+fi
+
+# intel-microcode
+if dpkg -l intel-microcode 2>/dev/null | grep -q "^ii"; then
+    MC_VER=$(dpkg-query -W -f='${Version}' intel-microcode 2>/dev/null || echo "?")
+    pass "intel-microcode installed (v$MC_VER) — CPU security patches active"
+else
+    warn "intel-microcode NOT installed — CPU may have known security vulnerabilities"
+    info "Fix: sudo apt-get install intel-microcode"
+fi
+
+# journald size cap
+if [ -f /etc/systemd/journald.conf.d/60-macbook-dev.conf ]; then
+    pass "journald: size cap configured (1GB disk, 2-week retention)"
+else
+    warn "journald: no size cap — logs may fill disk over time"
+fi
+
+# coredump cap
+if [ -f /etc/systemd/coredump.conf.d/60-macbook-dev.conf ]; then
+    pass "coredump: size cap configured (512MB per dump)"
+else
+    warn "coredump: no size cap — JVM/Chromium crashes can fill NVMe"
+fi
+
+# git fsmonitor (check for real user's config)
+if [ -n "${SUDO_USER:-}" ]; then
+    _FSMON=$(sudo -u "$SUDO_USER" git config --global core.fsmonitor 2>/dev/null || echo "false")
+    _UNTRACKED=$(sudo -u "$SUDO_USER" git config --global core.untrackedCache 2>/dev/null || echo "false")
+    if [ "$_FSMON" = "true" ]; then
+        pass "git global: core.fsmonitor=true (fast git status in large repos)"
+    else
+        warn "git global: core.fsmonitor not set — git status may be slow in large repos"
+        info "Fix: git config --global core.fsmonitor true"
+    fi
+    [ "$_UNTRACKED" = "true" ] && pass "git global: core.untrackedCache=true" || \
+        warn "git global: core.untrackedCache not set"
+else
+    info "git global config checks skipped (requires sudo)"
+fi
+
+# =============================================================================
 # AUDIO — delegate to verify-installation.sh
 # =============================================================================
 AUDIO_SCRIPT="$SCRIPT_DIR/verify-installation.sh"
 if [ -f "$AUDIO_SCRIPT" ]; then
-    echo -e "\n${BOLD}${BLUE}--- [+] Audio Driver (CS8409) — via verify-installation.sh ---${NC}"
+    echo -e "\n${BOLD}${BLUE}--- [+] Audio deep check — via verify-installation.sh ---${NC}"
     # Run and capture exit code, indent output
     bash "$AUDIO_SCRIPT" 2>&1 | grep -v "^======\|^    snd_hda" | sed 's/^/  /'
     AUDIO_RC=${PIPESTATUS[0]}
@@ -523,7 +719,7 @@ if [ -f "$AUDIO_SCRIPT" ]; then
         ((WARN++))
     fi
 else
-    warn "verify-installation.sh not found at $AUDIO_SCRIPT — skipping audio check"
+    warn "verify-installation.sh not found at $AUDIO_SCRIPT — skipping deep audio check"
 fi
 
 # =============================================================================

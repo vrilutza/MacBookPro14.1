@@ -21,7 +21,8 @@ jobs:
           FAIL=0
           for f in macbook_hardware_fixer.sh \
                    bluetooth/bluetooth.sh \
-                   fan/fan_setup.sh \
+                   fan/monitor_macfan_extreme.sh \
+                   fan/hardware.sh \
                    tests/verify-hardware.sh \
                    tests/verify-installation.sh \
                    tests/test-docker.sh; do

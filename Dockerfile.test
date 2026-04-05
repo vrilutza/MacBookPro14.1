@@ -14,9 +14,13 @@
 
 FROM ubuntu:26.04
 
-# Non-interactive apt
+# Non-interactive apt — prevents ALL interactive prompts including dpkg conffile
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TERM=xterm-256color
+
+# Force dpkg to keep new conffiles without prompting
+RUN echo 'Dpkg::Options { "--force-confnew"; "--force-confdef"; }' \
+    > /etc/apt/apt.conf.d/99-docker-no-prompts
 
 # Simulate SUDO_USER so gsettings/git blocks run
 ENV SUDO_USER=testuser
@@ -25,14 +29,13 @@ ENV SUDO_USER=testuser
 # Base tools needed before running the script
 # ─────────────────────────────────────────────────────────────────────────────
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
-    sudo bash python3 lsblk rfkill iw \
+    sudo bash python3 iw \
     2>/dev/null || true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mock system commands that require hardware or systemd
 # Each mock logs what it would do and exits 0 (non-blocking)
 # ─────────────────────────────────────────────────────────────────────────────
-RUN mkdir -p /usr/local/bin/mocks
 
 # systemctl: log calls, always succeed
 RUN printf '#!/bin/bash\necho "  [MOCK] systemctl $*"\nexit 0\n' \
@@ -68,11 +71,11 @@ RUN printf '#!/bin/bash\necho "  [MOCK] hciconfig $*"\nexit 0\n' \
 RUN printf '#!/bin/bash\necho "  [MOCK] rfkill $*"\nexit 0\n' \
     > /usr/local/bin/rfkill && chmod +x /usr/local/bin/rfkill
 
-# fstrim: log and succeed (no real filesystem)
+# fstrim: log and succeed (no real filesystem to trim)
 RUN printf '#!/bin/bash\necho "  [MOCK] fstrim $*"\nexit 0\n' \
     > /usr/local/bin/fstrim && chmod +x /usr/local/bin/fstrim
 
-# apfs-fuse: not available, mock gracefully
+# apfs-fuse: not available in container, fail gracefully so BT firmware scan skips
 RUN printf '#!/bin/bash\necho "  [MOCK] apfs-fuse: no macOS partition"\nexit 1\n' \
     > /usr/local/bin/apfs-fuse && chmod +x /usr/local/bin/apfs-fuse
 
@@ -80,19 +83,21 @@ RUN printf '#!/bin/bash\necho "  [MOCK] apfs-fuse: no macOS partition"\nexit 1\n
 RUN printf '#!/bin/bash\necho "  [MOCK] boltctl $*"\nexit 0\n' \
     > /usr/local/bin/boltctl && chmod +x /usr/local/bin/boltctl
 
-# Create fake /etc/default/grub so GRUB section runs
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-create directories and stub files that the script writes into
+# NOTE: do NOT pre-create /etc/bluetooth/main.conf — let bluez install create it
+#       to avoid dpkg conffile prompt during apt-get install bluez
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Fake GRUB config (script modifies this to add mem_sleep_default=s2idle)
 RUN echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"' > /etc/default/grub
 
-# Create fake /etc/fstab
+# Fake fstab (script adds noatime to this)
 RUN echo '/dev/nvme0n1p2 / ext4 defaults 0 1' > /etc/fstab
 
-# Create fake /etc/bluetooth/main.conf with standard sections
-RUN mkdir -p /etc/bluetooth && printf '[General]\nName=BlueZ\n\n[Policy]\n' \
-    > /etc/bluetooth/main.conf
-
-# Create testuser (simulates the logged-in user)
-RUN useradd -m -s /bin/bash testuser && echo "testuser ALL=(ALL) NOPASSWD:ALL" \
-    >> /etc/sudoers
+# Create testuser (simulates the logged-in user running with sudo)
+RUN useradd -m -s /bin/bash testuser \
+ && echo "testuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Copy project
@@ -100,8 +105,14 @@ RUN useradd -m -s /bin/bash testuser && echo "testuser ALL=(ALL) NOPASSWD:ALL" \
 COPY . /project
 WORKDIR /project
 
+# Mock install.cirrus.driver.sh — kernel compilation is not possible in a container
+# (no kernel headers, no build environment matching the container kernel).
+# The mock logs that it was called and exits 0 so the rest of the script continues.
+RUN printf '#!/bin/bash\necho "  [MOCK] install.cirrus.driver.sh (kernel compilation skipped in container)"\necho "  [MOCK] On real hardware: compiles and installs snd-hda-codec-cs8409.ko"\nexit 0\n' \
+    > /project/install.cirrus.driver.sh && chmod +x /project/install.cirrus.driver.sh
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Run the script — exit code tells us if something broke unexpectedly
+# Run the script and propagate its exit code correctly
 # ─────────────────────────────────────────────────────────────────────────────
 CMD ["/bin/bash", "-c", "\
     echo ''; \
@@ -111,8 +122,10 @@ CMD ["/bin/bash", "-c", "\
     echo '══════════════════════════════════════════════════════'; \
     echo ''; \
     bash macbook_hardware_fixer.sh; \
+    RC=$?; \
     echo ''; \
     echo '══════════════════════════════════════════════════════'; \
-    echo '  Script finished. Exit code: '$?; \
-    echo '══════════════════════════════════════════════════════' \
+    echo \"  Script finished. Exit code: $RC\"; \
+    echo '══════════════════════════════════════════════════════'; \
+    exit $RC \
 "]
