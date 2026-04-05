@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+# Default values for optional flags (required by set -u)
+dkms_action=''
+dkms=false
+
 usage() {
     cat << EOF
 Usage: $0 [OPTIONS] [KERNEL_VERSION]

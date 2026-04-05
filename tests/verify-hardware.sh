@@ -96,12 +96,18 @@ else
 fi
 
 # EasyEffects mic preset (noise gate + autogain)
-EE_PRESET_DIR="/etc/easyeffects/input"
-if [ -d "$EE_PRESET_DIR" ] && find "$EE_PRESET_DIR" -name "macbook-mic-noisegate.json" 2>/dev/null | grep -q .; then
-    pass "EasyEffects mic preset installed: $EE_PRESET_DIR/macbook-mic-noisegate.json"
+# Installed per-user to ~/.local/share/easyeffects/input/macbook-mic.json
+if [ -n "${SUDO_USER:-}" ]; then
+    _EE_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    _EE_PRESET="$_EE_HOME/.local/share/easyeffects/input/macbook-mic.json"
+    if [ -f "$_EE_PRESET" ]; then
+        pass "EasyEffects mic preset installed: $_EE_PRESET"
+    else
+        warn "EasyEffects mic preset not found: $_EE_PRESET"
+        info "Fix: run macbook_hardware_fixer.sh (step 0 installs the preset)"
+    fi
 else
-    warn "EasyEffects mic preset not found in $EE_PRESET_DIR"
-    info "Fix: run macbook_hardware_fixer.sh (step 0 installs the preset)"
+    info "EasyEffects preset check skipped (requires sudo to find user home)"
 fi
 
 # =============================================================================
@@ -399,12 +405,12 @@ if [ -f "$RAPL_TW0" ] && [ -f "$RAPL_TW1" ]; then
     TW1=$(cat "$RAPL_TW1" 2>/dev/null || echo 0)
     TW0_MS=$(( TW0 / 1000 ))
     TW1_MS=$(( TW1 / 1000 ))
-    if [ "$TW0_MS" -ge 500 ] && [ "$TW0_MS" -le 2000 ] 2>/dev/null; then
+    if [ "$TW0_MS" -ge 500 ] && [ "$TW0_MS" -le 2000 ]; then
         pass "RAPL PL1 time window: ${TW0_MS}ms (~1s — Intel spec)"
     else
         warn "RAPL PL1 time window: ${TW0_MS}ms (expected ~976ms — run macbook_hardware_fixer.sh)"
     fi
-    if [ "$TW1_MS" -ge 20000 ] && [ "$TW1_MS" -le 35000 ] 2>/dev/null; then
+    if [ "$TW1_MS" -ge 20000 ] && [ "$TW1_MS" -le 35000 ]; then
         pass "RAPL PL2 time window: ${TW1_MS}ms (~28s — Intel spec)"
     else
         warn "RAPL PL2 time window: ${TW1_MS}ms (expected ~27343ms — run macbook_hardware_fixer.sh)"

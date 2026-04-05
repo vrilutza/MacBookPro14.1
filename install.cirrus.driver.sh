@@ -7,6 +7,10 @@ set -euo pipefail
 # Store arguments before processing, in case we need to pass them to the pre617 script
 script_arguments_pre617="${@}"
 
+# Default values for optional flags (required by set -u)
+dkms_action=''
+dkms=false
+
 usage() {
     cat << EOF
 Usage: $0 [OPTIONS] [KERNEL_VERSION]
