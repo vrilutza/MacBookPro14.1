@@ -3,7 +3,7 @@
 Complete hardware support guide and drivers for **MacBook Pro 13" 2017 (MacBookPro14,1)**
 running Ubuntu 26.04.
 
-Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery · Fan · Touchpad · Suspend
+Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery · Fan · Touchpad · Suspend · **Color Calibration**
 
 ---
 
@@ -27,6 +27,7 @@ Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery ·
 | Suspend/Sleep | Intel S0ix / s2idle | ✅ Works (s2idle + NVMe d3cold fix) | `macbook_hardware_fixer.sh` step 9 |
 | NVMe Storage | Apple SSD AP0256J | ✅ Works natively | — |
 | USB 3.0 | Intel xHCI | ✅ Works natively | — |
+| **Display color calibration** | **Apple factory ICC profile** | **✅ Works** | **`macbook_hardware_fixer.sh` step 11** |
 
 
 ## Known Limitations
@@ -69,7 +70,8 @@ cd snd_hda_macbookpro
 ```
 
 **Step 3 — Install all hardware drivers** (Audio, GPU, Bluetooth, WiFi, Camera,
-Thunderbolt, Battery, Fan, Keyboard backlight, Touchpad, Suspend):
+Thunderbolt, Battery, Fan, Keyboard backlight, Touchpad, Suspend,
+**Display color calibration**):
 ```bash
 sudo ./macbook_hardware_fixer.sh
 ```
@@ -96,7 +98,7 @@ sudo reboot
 
 **Step 6 — Verify everything was applied correctly:**
 ```bash
-# Full hardware check (all 10 steps including audio):
+# Full hardware check (all 12 steps including audio + color calibration):
 ./tests/verify-hardware.sh
 sudo ./tests/verify-hardware.sh   # for complete Bluetooth config check
 
@@ -190,6 +192,12 @@ Works out of the box with the `brcmfmac` kernel driver. The script applies optim
 - Disables WiFi power save (causes latency spikes) via NetworkManager:
   `/etc/NetworkManager/conf.d/99-wifi-powersave-off.conf`
 - Sets `power_save=0 roamoff=1` via `/etc/modprobe.d/brcmfmac-macbook.conf`
+- Installs macOS NVRAM (board-specific RF calibration) from `firmware/wifi/`:
+  - `brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt` (model-specific, kernel prefers this)
+  - `brcmfmac4350-pcie.txt` (generic fallback)
+  
+  The macOS NVRAM is calibrated for `boardid=0x170` (hawaii platform) and improves WiFi
+  range, 5 GHz stability, and regulatory compliance vs the generic Linux NVRAM.
 
 **Set regulatory domain** (if channels are limited):
 ```bash
@@ -266,6 +274,10 @@ Expected result after reboot: **15–25°C lower** at idle and under moderate lo
 cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw   # should be 15000000 (15W)
 cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw   # should be 25000000 (25W)
 
+# Check RAPL time windows (Intel Kaby Lake U spec):
+cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_time_window_us   # should be 976563  (~1s)
+cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_time_window_us   # should be 27343000 (~28s)
+
 # Check RAPL service:
 systemctl status macbook-rapl-limits
 
@@ -317,8 +329,8 @@ i5-7360U. The profile (tested on Ubuntu 26.04) keeps the Mac cooler than the def
 
 | Setting | Value | Reason |
 |---------|-------|--------|
-| `min_fan1_speed` | 3000 RPM | Never completely silent — prevents heat build-up |
-| `low_temp` | 40°C | Fan starts ramping early |
+| `min_fan1_speed` | 3500 RPM | Never completely silent — prevents heat build-up |
+| `low_temp` | 38°C | Fan starts ramping early |
 | `high_temp` | 50°C | Ramps up quickly |
 | `max_temp` | 55°C | Full speed above this |
 | `polling_interval` | 1 s | Fast response to temperature spikes |
@@ -358,6 +370,8 @@ Configured automatically for both Wayland (via `gsettings`) and X11 (via
 - Two-finger scroll
 - Clickfinger (1-finger = left, 2-finger = right, 3-finger = middle)
 - Disable-while-typing
+- **PalmDetection** — prevents cursor jumps when palms touch the trackpad while typing
+- **TappingButtonMap = lrm** — 1-finger tap = left, 2-finger = right, 3-finger = middle
 
 **Fn key behaviour** (set via `hid_apple fnmode`):
 ```bash
@@ -381,6 +395,14 @@ brightnessctl set 50%
 brightnessctl set +10%
 brightnessctl set 10%-
 ```
+
+**Lid-open auto-boot** (step 9): macOS sets an EFI variable that causes the MacBook Pro
+to power on automatically when the lid is opened. The script disables this:
+```bash
+printf '\x07\x00\x00\x00\x00' | sudo tee /sys/firmware/efi/efivars/AutoBoot-7c436110-ab2a-4bbb-a880-fe41995c9f82
+```
+Applied once at install time. If you see "No space left on device", clear stale EFI dump
+variables first (see [Known Limitations](#known-limitations)).
 
 **Suspend:** MacBook Pro 14,1 requires two fixes for reliable suspend/resume:
 
@@ -434,7 +456,11 @@ sudo depmod -a
 - Input: set to **Analogue Stereo Duplex**
 
 **Microphone:** the recorded level is low (same as macOS raw level).
-Use PulseEffects or EasyEffects to amplify.
+The script installs an **EasyEffects mic preset** (`macbook-mic-noisegate.json`) with:
+- Noise gate (removes background hiss between speech)
+- Auto-gain (normalises input level)
+
+Load the preset in EasyEffects → Presets → Input → `macbook-mic-noisegate`.
 
 **NOTA BENE:** The direct hardware device `hw:0,0` and `plughw:0,0` have
 **NO volume control** and will be **VERY loud**.
@@ -496,6 +522,113 @@ git config --global core.fsmonitor      # true
 **Live monitor (fan + temps):**
 ```bash
 macbook-monitor   # colour-coded RPM + CPU temps, Ctrl+C to quit
+```
+
+---
+
+### 12. Display Color Calibration — Apple factory ICC profile
+
+**Script:** `macbook_hardware_fixer.sh` step 11
+
+The MacBook Pro 13" 2017 display is **factory-calibrated by Apple** at the unit level.
+macOS ships a per-display ICC profile that encodes:
+
+| Data | What it does |
+|---|---|
+| RGB primaries (rXYZ, gXYZ, bXYZ) | Describes the panel's actual gamut — wider than sRGB |
+| Tone response curves (rTRC/gTRC/bTRC) | 1024-point factory gamma curves per channel |
+| White point (D65) | Ensures neutral whites match the calibrated D65 standard |
+| Apple vcgt/vcgp | Video card gamma table metadata |
+
+**Without this profile**, Ubuntu uses a generic sRGB assumption: colors appear
+oversaturated (especially reds and greens) and the white point is wrong.
+
+The profile is included in this repo at `firmware/display/Color-LCD-MacBookPro14-1.icc` (3.3 kB),
+extracted from macOS Ventura at:
+```
+/Library/ColorSync/Profiles/Displays/Color LCD-<UUID>.icc
+```
+
+**What the script does:**
+
+1. Installs `colord` (Linux color management daemon)
+2. Copies the profile to `/usr/share/color/icc/macbook/` (system-wide)
+3. Copies to `~/.local/share/icc/` (per-user — GNOME Color Manager lists it here)
+4. Installs `/usr/local/bin/macbook-color-profile.sh` — assigns the profile to the
+   built-in eDP display via `colormgr` on each login
+5. Creates `~/.config/autostart/macbook-color-profile.desktop` — runs the script
+   automatically on every GNOME session start
+
+**Verify:**
+```bash
+# Check profile files are installed
+ls /usr/share/color/icc/macbook/
+ls ~/.local/share/icc/
+
+# Check colord knows about the profile (after login)
+colormgr get-profiles | grep Color-LCD
+
+# Check the built-in display device
+colormgr get-devices
+
+# Manually assign (if autostart didn't fire yet):
+/usr/local/bin/macbook-color-profile.sh
+
+# GNOME GUI: Settings → Color → built-in display → select 'Color-LCD-MacBookPro14-1'
+```
+
+**Notes:**
+- The autostart script runs after every login — colord resets profile assignments
+  between sessions, so it must be re-applied each time.
+- If you use a display manager other than GDM, add `macbook-color-profile.sh` to
+  your session startup manually.
+- For dual-boot: the profile is already on the macOS partition at
+  `/Library/ColorSync/Profiles/Displays/Color LCD-*.icc` if you ever need to re-extract it.
+
+---
+
+### 13. Night Shift → redshift (colour temperature)
+
+**Script:** `macbook_hardware_fixer.sh` step 12
+
+macOS Night Shift automatically shifts the display to warmer colours at night (reduces
+blue light). The Linux equivalent is **redshift**.
+
+The script installs `redshift-gtk` and configures it with Apple-equivalent colour
+temperatures:
+
+| Mode | Temperature | Equivalent |
+|------|-------------|------------|
+| Day | 6500 K | D65 (neutral white — matches macOS Day setting) |
+| Night | 4000 K | Warm/amber (matches macOS Night Shift "warm" preset) |
+
+**Config:** `/etc/xdg/redshift.conf` — edit `lat` / `lon` for your location:
+```ini
+[redshift]
+temp-day=6500
+temp-night=4000
+fade=1
+gamma=1.0
+location-provider=manual
+
+[manual]
+lat=44.4      ; Bucharest — change to your latitude
+lon=26.1      ; Bucharest — change to your longitude
+```
+
+**Autostart:** `~/.config/autostart/redshift.desktop` — runs `redshift-gtk` on every login.
+
+**Verify:**
+```bash
+command -v redshift-gtk        # should find the binary
+cat /etc/xdg/redshift.conf     # temp-day=6500, temp-night=4000
+ls ~/.config/autostart/redshift.desktop   # autostart entry
+```
+
+To adjust manually (without restarting):
+```bash
+redshift -x                  # reset (disable colour shift)
+redshift -O 4000             # force 4000K immediately
 ```
 
 ---

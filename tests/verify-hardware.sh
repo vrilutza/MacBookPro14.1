@@ -3,8 +3,9 @@
 # =============================================================================
 # MacBook Pro Hardware Verifier
 # Checks that macbook_hardware_fixer.sh was applied correctly.
-# Covers all 10 steps (0-10): Audio/CS8409, GPU, Bluetooth, WiFi, Camera,
-# Thunderbolt, Battery/Thermal, applesmc, Touchpad/Keyboard, Brightness/Suspend.
+# Covers all 12 steps (0-12): Audio/CS8409, GPU, Bluetooth, WiFi, Camera,
+# Thunderbolt, Battery/Thermal, applesmc, Touchpad/Keyboard, Brightness/Suspend,
+# System optimizations, Display ICC, Night Shift/redshift.
 #
 # Usage: ./verify-hardware.sh [--help] [--root-only]
 # No root required for most checks; run as root for full Bluetooth config check.
@@ -21,9 +22,9 @@ PASS=0
 FAIL=0
 WARN=0
 
-pass() { echo -e "    ${GREEN}[✔]${NC} $1"; ((PASS++)); }
-fail() { echo -e "    ${RED}[✘]${NC} $1"; ((FAIL++)); }
-warn() { echo -e "    ${YELLOW}[!]${NC} $1"; ((WARN++)); }
+pass() { echo -e "    ${GREEN}[✔]${NC} $1"; PASS=$((PASS + 1)); }
+fail() { echo -e "    ${RED}[✘]${NC} $1"; FAIL=$((FAIL + 1)); }
+warn() { echo -e "    ${YELLOW}[!]${NC} $1"; WARN=$((WARN + 1)); }
 info() { echo -e "    ${BLUE}[i]${NC} $1"; }
 step() { echo -e "\n${BOLD}${BLUE}--- $1 ---${NC}"; }
 
@@ -35,20 +36,22 @@ if [[ "${1}" == "-h" || "${1}" == "--help" ]]; then
 Usage: $0 [--help]
 
 Verifies that macbook_hardware_fixer.sh was correctly applied on this system.
-Checks all 10 hardware steps (0-10).
+Checks all 12 hardware steps (0-12).
 
 Steps verified:
-  [0/10] Cirrus CS8409 Audio  — .ko module file + lsmod
-  [1/10] Intel Iris Plus 640  — VA-API packages + i915 driver
-  [2/10] Bluetooth BCM4350C0  — firmware, hci0 status, bluez config, WirePlumber
-  [3/10] WiFi BCM4350         — brcmfmac module, power save config
-  [4/10] FaceTime HD Camera   — facetimehd module + firmware + /dev/video device
-  [5/10] Thunderbolt 3        — bolt service
-  [6/10] Battery & Thermal    — TLP + thermald services
-  [7/10] applesmc             — fan, temperature sensors, keyboard backlight
-  [8/10] Touchpad & Keyboard  — libinput config, hid_apple fnmode
-  [9/10] Brightness + Suspend — brightnessctl, s2idle GRUB, NVMe d3cold service
-  [10/10] System optimizations — ZRAM, BBR, NVMe scheduler, earlyoom
+  [0/12]  Cirrus CS8409 Audio     — .ko module file + lsmod + EasyEffects
+  [1/12]  Intel Iris Plus 640     — VA-API packages + i915 driver
+  [2/12]  Bluetooth BCM4350C0     — firmware, hci0 status, bluez config, WirePlumber
+  [3/12]  WiFi BCM4350            — brcmfmac module, power save config, NVRAM
+  [4/12]  FaceTime HD Camera      — facetimehd module + firmware + /dev/video device
+  [5/12]  Thunderbolt 3           — bolt service
+  [6/12]  Battery & Thermal       — TLP + thermald, RAPL PL1/PL2 + time windows
+  [7/12]  applesmc                — fan, temperature sensors, keyboard backlight
+  [8/12]  Touchpad & Keyboard     — libinput config + PalmDetection, hid_apple fnmode
+  [9/12]  Brightness + Suspend    — brightnessctl, s2idle GRUB, NVMe d3cold, EFI autoboot
+  [10/12] System optimizations    — ZRAM, BBR, NVMe scheduler, earlyoom
+  [11/12] Display ICC             — Apple factory color profile, colord assignment
+  [12/12] Night Shift → redshift  — redshift-gtk installed, config, autostart
 
 Exit codes:
   0 — all checks passed (warnings are informational only)
@@ -77,7 +80,7 @@ echo -e "${NC}"
 # =============================================================================
 # STEP 0 — Cirrus Logic CS8409 — HDA Audio Driver
 # =============================================================================
-step "0/10 — Cirrus Logic CS8409 — HDA audio driver"
+step "0/12 — Cirrus Logic CS8409 — HDA audio driver"
 
 KO_PATH=$(find /lib/modules/"$KERNEL"/updates -name "snd-hda-codec-cs8409.ko*" 2>/dev/null | head -1)
 if [ -n "$KO_PATH" ]; then
@@ -92,10 +95,19 @@ else
     warn "snd_hda_codec_cs8409 not loaded — may need reboot after first install"
 fi
 
+# EasyEffects mic preset (noise gate + autogain)
+EE_PRESET_DIR="/etc/easyeffects/input"
+if [ -d "$EE_PRESET_DIR" ] && find "$EE_PRESET_DIR" -name "macbook-mic-noisegate.json" 2>/dev/null | grep -q .; then
+    pass "EasyEffects mic preset installed: $EE_PRESET_DIR/macbook-mic-noisegate.json"
+else
+    warn "EasyEffects mic preset not found in $EE_PRESET_DIR"
+    info "Fix: run macbook_hardware_fixer.sh (step 0 installs the preset)"
+fi
+
 # =============================================================================
 # STEP 1 — Intel Iris Plus 640 — VA-API
 # =============================================================================
-step "1/10 — Intel Iris Plus 640 GPU — VA-API"
+step "1/12 — Intel Iris Plus 640 GPU — VA-API"
 
 if dpkg -l intel-media-va-driver &>/dev/null 2>&1; then
     pass "intel-media-va-driver installed (Gen 9 / Kaby Lake VA-API)"
@@ -130,7 +142,7 @@ fi
 # =============================================================================
 # STEP 2 — Bluetooth BCM4350C0
 # =============================================================================
-step "2/10 — Bluetooth BCM4350C0 UART"
+step "2/12 — Bluetooth BCM4350C0 UART"
 
 BT_FW="/lib/firmware/brcm/BCM4350C0.hcd"
 BT_FW_OLD="/lib/firmware/brcm/BCM2E7C.hcd"
@@ -224,7 +236,7 @@ fi
 # =============================================================================
 # STEP 3 — WiFi BCM4350
 # =============================================================================
-step "3/10 — WiFi BCM4350 — brcmfmac"
+step "3/12 — WiFi BCM4350 — brcmfmac"
 
 if lsmod | grep -q "^brcmfmac "; then
     pass "brcmfmac module loaded"
@@ -254,10 +266,21 @@ else
     fail "brcmfmac modprobe config missing or incomplete: $BRCM_CONF"
 fi
 
+WIFI_NVRAM_GENERIC="/lib/firmware/brcm/brcmfmac4350-pcie.txt"
+WIFI_NVRAM_MODEL="/lib/firmware/brcm/brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt"
+if [ -f "$WIFI_NVRAM_MODEL" ]; then
+    pass "WiFi NVRAM (model-specific) installed: $(basename "$WIFI_NVRAM_MODEL")"
+elif [ -f "$WIFI_NVRAM_GENERIC" ]; then
+    pass "WiFi NVRAM (generic) installed: $(basename "$WIFI_NVRAM_GENERIC")"
+else
+    warn "WiFi NVRAM not installed — WiFi may have sub-optimal TX power / 5 GHz stability"
+    info "Fix: run macbook_hardware_fixer.sh (step 3 copies macOS NVRAM from firmware/wifi/)"
+fi
+
 # =============================================================================
 # STEP 4 — FaceTime HD Camera
 # =============================================================================
-step "4/10 — FaceTime HD Camera — facetimehd"
+step "4/12 — FaceTime HD Camera — facetimehd"
 
 if lsmod | grep -q "^facetimehd "; then
     pass "facetimehd kernel module loaded"
@@ -284,7 +307,7 @@ fi
 # =============================================================================
 # STEP 5 — Thunderbolt 3
 # =============================================================================
-step "5/10 — Thunderbolt 3 — bolt"
+step "5/12 — Thunderbolt 3 — bolt"
 
 if command -v boltctl &>/dev/null; then
     pass "bolt installed (boltctl available)"
@@ -301,7 +324,7 @@ fi
 # =============================================================================
 # STEP 6 — Battery & Thermal
 # =============================================================================
-step "6/10 — Battery & Thermal — TLP + thermald"
+step "6/12 — Battery & Thermal — TLP + thermald"
 
 if systemctl is-active tlp &>/dev/null 2>&1; then
     pass "TLP battery management service is active"
@@ -368,6 +391,28 @@ else
     fail "macbook-rapl-limits service NOT enabled — CPU overheating on every boot"
 fi
 
+# RAPL time windows (PL1 ~1s, PL2 ~28s — Intel Kaby Lake U spec)
+RAPL_TW0="$RAPL_BASE/constraint_0_time_window_us"
+RAPL_TW1="$RAPL_BASE/constraint_1_time_window_us"
+if [ -f "$RAPL_TW0" ] && [ -f "$RAPL_TW1" ]; then
+    TW0=$(cat "$RAPL_TW0" 2>/dev/null || echo 0)
+    TW1=$(cat "$RAPL_TW1" 2>/dev/null || echo 0)
+    TW0_MS=$(( TW0 / 1000 ))
+    TW1_MS=$(( TW1 / 1000 ))
+    if [ "$TW0_MS" -ge 500 ] && [ "$TW0_MS" -le 2000 ] 2>/dev/null; then
+        pass "RAPL PL1 time window: ${TW0_MS}ms (~1s — Intel spec)"
+    else
+        warn "RAPL PL1 time window: ${TW0_MS}ms (expected ~976ms — run macbook_hardware_fixer.sh)"
+    fi
+    if [ "$TW1_MS" -ge 20000 ] && [ "$TW1_MS" -le 35000 ] 2>/dev/null; then
+        pass "RAPL PL2 time window: ${TW1_MS}ms (~28s — Intel spec)"
+    else
+        warn "RAPL PL2 time window: ${TW1_MS}ms (expected ~27343ms — run macbook_hardware_fixer.sh)"
+    fi
+else
+    info "RAPL time windows not readable (requires root or not available)"
+fi
+
 # CPU temperature
 PKG_TEMP=$(cat /sys/class/thermal/thermal_zone1/temp 2>/dev/null || cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1)
 if [ -n "$PKG_TEMP" ]; then
@@ -398,7 +443,7 @@ fi
 # =============================================================================
 # STEP 7 — applesmc: Fan, Sensors, Keyboard Backlight
 # =============================================================================
-step "7/10 — applesmc: Fan / Sensors / Keyboard Backlight"
+step "7/12 — applesmc: Fan / Sensors / Keyboard Backlight"
 
 if lsmod | grep -q "^applesmc "; then
     pass "applesmc kernel module loaded"
@@ -467,7 +512,7 @@ fi
 # =============================================================================
 # STEP 8 — Touchpad & Keyboard
 # =============================================================================
-step "8/10 — Touchpad & Keyboard — libinput"
+step "8/12 — Touchpad & Keyboard — libinput"
 
 LIBINPUT_CONF="/usr/share/X11/xorg.conf.d/40-macbook-libinput.conf"
 if [ -f "$LIBINPUT_CONF" ]; then
@@ -476,6 +521,17 @@ if [ -f "$LIBINPUT_CONF" ]; then
         pass "tap-to-click configured in libinput"
     else
         warn "tap-to-click not found in $LIBINPUT_CONF"
+    fi
+    if grep -q "PalmDetection.*on" "$LIBINPUT_CONF"; then
+        pass "PalmDetection enabled in libinput (no cursor jump during typing)"
+    else
+        warn "PalmDetection not set in $LIBINPUT_CONF — cursor may jump while typing"
+        info "Fix: run macbook_hardware_fixer.sh (step 8 adds PalmDetection)"
+    fi
+    if grep -q "TappingButtonMap.*lrm" "$LIBINPUT_CONF"; then
+        pass "TappingButtonMap=lrm (1-finger=left, 2=right, 3=middle tap)"
+    else
+        warn "TappingButtonMap not set in $LIBINPUT_CONF"
     fi
 else
     fail "X11 libinput config missing: $LIBINPUT_CONF"
@@ -528,7 +584,7 @@ fi
 # =============================================================================
 # STEP 9 — Screen Brightness + Suspend/Sleep
 # =============================================================================
-step "9/10 — Screen Brightness + Suspend/Sleep"
+step "9/12 — Screen Brightness + Suspend/Sleep"
 
 if command -v brightnessctl &>/dev/null; then
     pass "brightnessctl installed"
@@ -574,10 +630,28 @@ else
     warn "NVMe PCI device 0000:01:00.0 not found in sysfs"
 fi
 
+# Auto-boot EFI variable (lid-open should not power on without pressing Power)
+AUTOBOOT_EFI="/sys/firmware/efi/efivars/AutoBoot-7c436110-ab2a-4bbb-a880-fe41995c9f82"
+if $IS_ROOT; then
+    if [ -f "$AUTOBOOT_EFI" ]; then
+        AB_VAL=$(dd if="$AUTOBOOT_EFI" bs=1 skip=4 count=1 2>/dev/null | xxd -p 2>/dev/null || echo "ff")
+        if [ "$AB_VAL" = "00" ]; then
+            pass "EFI AutoBoot=0x00 — lid-open auto-power-on disabled"
+        else
+            warn "EFI AutoBoot=0x${AB_VAL} — lid-open may power on MacBook automatically"
+            info "Fix: run macbook_hardware_fixer.sh (step 9 sets AutoBoot EFI var to 0x00)"
+        fi
+    else
+        info "AutoBoot EFI variable not found (may already be cleared or efivarfs not mounted)"
+    fi
+else
+    info "AutoBoot EFI check skipped (requires root) — re-run with sudo"
+fi
+
 # =============================================================================
 # STEP 10 — System & Development optimizations
 # =============================================================================
-step "10/10 — System & Development optimizations"
+step "10/12 — System & Development optimizations"
 
 # ZRAM
 if zramctl 2>/dev/null | grep -q "^/dev/zram"; then
@@ -705,6 +779,101 @@ else
 fi
 
 # =============================================================================
+# STEP 11 — Display Color Calibration — Apple LCD ICC profile
+# =============================================================================
+step "11/12 — Display color calibration — Apple factory ICC profile"
+
+ICC_SYSTEM="/usr/share/color/icc/macbook/Color-LCD-MacBookPro14-1.icc"
+ICC_NAME="Color-LCD-MacBookPro14-1"
+
+if [ -f "$ICC_SYSTEM" ]; then
+    ICC_SIZE=$(stat -c%s "$ICC_SYSTEM" 2>/dev/null || echo 0)
+    pass "ICC profile installed system-wide: $ICC_SYSTEM (${ICC_SIZE} bytes)"
+else
+    fail "ICC profile NOT installed: $ICC_SYSTEM"
+    info "Fix: run macbook_hardware_fixer.sh (step 11 copies firmware/display/Color-LCD-MacBookPro14-1.icc)"
+fi
+
+if [ -n "${SUDO_USER:-}" ]; then
+    REAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    USER_ICC="$REAL_HOME/.local/share/icc/${ICC_NAME}.icc"
+    if [ -f "$USER_ICC" ]; then
+        pass "ICC profile installed for user '$SUDO_USER': $USER_ICC"
+    else
+        warn "ICC profile not in user dir $USER_ICC — GNOME Color Manager may not list it"
+        info "Fix: run macbook_hardware_fixer.sh (copies to ~/.local/share/icc/)"
+    fi
+
+    AUTOSTART="$REAL_HOME/.config/autostart/macbook-color-profile.desktop"
+    if [ -f "$AUTOSTART" ]; then
+        pass "Color profile autostart entry present: $AUTOSTART"
+    else
+        warn "Color profile autostart missing: $AUTOSTART — profile won't be auto-assigned on login"
+        info "Fix: run macbook_hardware_fixer.sh (step 11 creates the autostart entry)"
+    fi
+else
+    info "User ICC + autostart checks skipped (requires sudo)"
+fi
+
+if command -v colormgr &>/dev/null; then
+    pass "colormgr (colord) installed"
+    # Check if profile is registered in the colord session (may not be if not logged in as user)
+    if colormgr get-profiles 2>/dev/null | grep -q "$ICC_NAME"; then
+        pass "colord: '$ICC_NAME' profile is registered in current session"
+    else
+        info "colord: profile not registered in current session (normal — registered on user login via autostart)"
+    fi
+else
+    warn "colormgr not installed — color profile assignment will not work"
+    info "Fix: sudo apt-get install colord"
+fi
+
+if [ -x /usr/local/bin/macbook-color-profile.sh ]; then
+    pass "Color profile assignment script: /usr/local/bin/macbook-color-profile.sh"
+else
+    fail "Color profile assignment script not found / not executable"
+    info "Fix: run macbook_hardware_fixer.sh (step 11 installs this script)"
+fi
+
+# =============================================================================
+# STEP 12 — Night Shift → redshift (colour temperature)
+# =============================================================================
+step "12/12 — Night Shift → redshift (colour temperature)"
+
+if command -v redshift &>/dev/null || command -v redshift-gtk &>/dev/null; then
+    pass "redshift installed ($(command -v redshift-gtk 2>/dev/null || command -v redshift))"
+else
+    fail "redshift NOT installed — no colour temperature control (Night Shift equivalent)"
+    info "Fix: run macbook_hardware_fixer.sh (step 12 installs redshift-gtk)"
+fi
+
+REDSHIFT_CONF="/etc/xdg/redshift.conf"
+if [ -f "$REDSHIFT_CONF" ]; then
+    pass "redshift system config present: $REDSHIFT_CONF"
+    if grep -q "temp-day=6500" "$REDSHIFT_CONF" && grep -q "temp-night=4000" "$REDSHIFT_CONF"; then
+        pass "redshift colour temperatures: 6500K day / 4000K night"
+    else
+        warn "redshift temps not set to 6500K/4000K — check $REDSHIFT_CONF"
+    fi
+else
+    warn "redshift system config not found: $REDSHIFT_CONF"
+    info "Fix: run macbook_hardware_fixer.sh (step 12 writes /etc/xdg/redshift.conf)"
+fi
+
+if [ -n "${SUDO_USER:-}" ]; then
+    REAL_HOME_RS=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    RS_AUTOSTART="$REAL_HOME_RS/.config/autostart/redshift.desktop"
+    if [ -f "$RS_AUTOSTART" ]; then
+        pass "redshift autostart entry present: $RS_AUTOSTART"
+    else
+        warn "redshift autostart missing: $RS_AUTOSTART — won't start on login"
+        info "Fix: run macbook_hardware_fixer.sh (step 12 creates the autostart entry)"
+    fi
+else
+    info "redshift autostart check skipped (requires sudo)"
+fi
+
+# =============================================================================
 # AUDIO — delegate to verify-installation.sh
 # =============================================================================
 AUDIO_SCRIPT="$SCRIPT_DIR/verify-installation.sh"
@@ -714,9 +883,9 @@ if [ -f "$AUDIO_SCRIPT" ]; then
     bash "$AUDIO_SCRIPT" 2>&1 | grep -v "^======\|^    snd_hda" | sed 's/^/  /'
     AUDIO_RC=${PIPESTATUS[0]}
     if [ $AUDIO_RC -eq 0 ]; then
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
-        ((WARN++))
+        WARN=$((WARN + 1))
     fi
 else
     warn "verify-installation.sh not found at $AUDIO_SCRIPT — skipping deep audio check"

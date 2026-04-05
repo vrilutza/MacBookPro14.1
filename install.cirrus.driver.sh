@@ -2,7 +2,7 @@
 
 # NOTA BENE - this script should be run as root
 
-set -e
+set -euo pipefail
 
 # Store arguments before processing, in case we need to pass them to the pre617 script
 script_arguments_pre617="${@}"

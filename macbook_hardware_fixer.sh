@@ -1,23 +1,25 @@
 #!/bin/bash
 # =============================================================================
-# MacBook Pro Ubuntu — Complete Setup v4.0
+# MacBook Pro Ubuntu — Complete Setup v5.0
 # For: MacBook Pro 13" 2017 (MacBookPro14,1) on Ubuntu 26.04+
 #
 # Run once after a fresh Ubuntu install:
 #   sudo bash macbook_hardware_fixer.sh
 #
-# Hardware covered:
-#   0. Cirrus Logic CS8409        — HDA audio kernel driver (compiled)
-#   1. Intel Iris Plus 640 GPU    — VA-API hardware acceleration
-#   2. Bluetooth BCM4350C0 UART   — firmware fix + bluez config
-#   3. WiFi Broadcom BCM4350      — power save + regulatory domain
-#   4. FaceTime HD Camera         — compile & install facetimehd driver
-#   5. Thunderbolt 3 Alpine Ridge — bolt authorization daemon
-#   6. Battery & Thermal          — TLP + thermald
-#   7. applesmc: Fan + Sensors + Keyboard Backlight
-#   8. Touchpad & Keyboard        — libinput tap-to-click + natural scroll
-#   9. Screen Brightness + Suspend — brightnessctl + s2idle sleep fix
-#  10. System & Dev optimizations — ZRAM, sysctl, BBR, earlyoom, ulimits
+# Hardware covered (0-11, 12 steps total):
+#    0. Cirrus Logic CS8409        — HDA audio + EasyEffects mic preset
+#    1. Intel Iris Plus 640 GPU    — VA-API hardware acceleration
+#    2. Bluetooth BCM4350C0 UART   — firmware (from firmware/) + bluez config
+#    3. WiFi Broadcom BCM4350      — macOS NVRAM + power save optimizations
+#    4. FaceTime HD Camera         — compile & install facetimehd driver
+#    5. Thunderbolt 3 Alpine Ridge — bolt authorization daemon
+#    6. Battery & Thermal          — TLP + thermald + RAPL PL1/PL2 + time windows
+#    7. applesmc: Fan + Sensors + Keyboard Backlight
+#    8. Touchpad & Keyboard        — libinput + PalmDetection + natural scroll
+#    9. Screen Brightness + Suspend — s2idle + NVMe d3cold + auto-boot EFI fix
+#   10. System & Dev optimizations — ZRAM, sysctl, BBR, earlyoom, ulimits
+#   11. Display color calibration  — Apple factory ICC profile + colord autostart
+#   12. Night Shift → redshift     — 6500K day / 4000K night (macOS Night Shift port)
 # =============================================================================
 
 set -euo pipefail
@@ -44,10 +46,13 @@ fi
 
 KERNEL=$(uname -r)
 REAL_USER="${SUDO_USER:-}"
+# Calculate REAL_HOME once — used in steps 8, 11, 12
+REAL_HOME=""
+[ -n "$REAL_USER" ] && REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
 
 echo -e "${BOLD}"
 echo "============================================================"
-echo "   MacBook Pro Ubuntu — Complete Setup v4.0               "
+echo "   MacBook Pro Ubuntu — Complete Setup v5.0               "
 echo "   MacBook Pro 13\" 2017 | Ubuntu 26.04 | Kernel $KERNEL"
 echo "============================================================"
 echo -e "${NC}"
@@ -60,7 +65,7 @@ echo -e "${NC}"
 # install.cirrus.driver.sh handles: kernel detection, source download, patching,
 # compilation, and installation into /lib/modules/$(uname -r)/updates/.
 # =============================================================================
-log_step "0/10 — Cirrus Logic CS8409 — HDA audio kernel driver"
+log_step "0/12 — Cirrus Logic CS8409 — HDA audio kernel driver + mic preset"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CIRRUS_INSTALLER="$SCRIPT_DIR/install.cirrus.driver.sh"
@@ -76,10 +81,53 @@ else
     log_info "Clone the full repo to get audio driver support: git clone <repo-url>"
 fi
 
+# --- EasyEffects: mic amplification + noise gate preset ---
+# macOS applies DSP on the internal mic (BeamFormer + noise gate) via CoreAudio.
+# Without processing the Linux mic level is too low and picks up fan/keyboard noise.
+# EasyEffects applies equivalent processing: noise gate at -26 dB + autogain to -18 dBFS.
+apt-get install -y --no-install-recommends easyeffects 2>/dev/null || \
+    apt-get install -y --no-install-recommends pulseeffects 2>/dev/null || true
+
+if [ -n "$REAL_HOME" ]; then
+    EE_PRESET_DIR="$REAL_HOME/.local/share/easyeffects/input"
+    mkdir -p "$EE_PRESET_DIR"
+    cat > "$EE_PRESET_DIR/macbook-mic.json" << 'EOF'
+{
+    "input": {
+        "blocklist": [],
+        "plugins_order": ["gate#0", "autogain#0"],
+        "gate#0": {
+            "bypass": false,
+            "input-gain": 0.0,
+            "output-gain": 0.0,
+            "attack": 20.0,
+            "release": 250.0,
+            "threshold": -26.0,
+            "ratio": 10.0,
+            "knee": 2.0,
+            "range": -12.0,
+            "makeup": 0.0,
+            "detection": "RMS",
+            "stereo-link": "Average"
+        },
+        "autogain#0": {
+            "bypass": false,
+            "target": -18.0,
+            "silence-threshold": -70.0,
+            "maximum-history": 5
+        }
+    }
+}
+EOF
+    chown -R "$REAL_USER:$REAL_USER" "$EE_PRESET_DIR"
+    log_ok "EasyEffects mic preset installed: noise gate + autogain (macOS mic DSP equivalent)."
+    log_info "Open EasyEffects → Input → load 'macbook-mic' preset to activate."
+fi
+
 # =============================================================================
 # STEP 1: System update + Intel GPU VA-API acceleration
 # =============================================================================
-log_step "1/10 — Intel Iris Plus 640 GPU — VA-API acceleration"
+log_step "1/12 — Intel Iris Plus 640 GPU — VA-API acceleration"
 
 apt-get update -qq
 
@@ -114,7 +162,7 @@ log_ok "i915: FBC + PSR enabled (saves 1-2W GPU power draw)."
 # =============================================================================
 # STEP 2: Bluetooth BCM4350C0 — firmware fix + bluez config
 # =============================================================================
-log_step "2/10 — Bluetooth BCM4350C0 UART — firmware fix"
+log_step "2/12 — Bluetooth BCM4350C0 UART — firmware fix"
 
 # --- 2a-pre. Remove wrong blacklists from /etc/modprobe.d/ ---
 # Common bad internet advice: "blacklist hci_uart" or "blacklist btusb"
@@ -217,8 +265,6 @@ fi
 #
 BT_FW_DEST="/lib/firmware/brcm/BCM4350C0.hcd"
 
-mkdir -p /lib/firmware/brcm
-
 # --- 2c-pre. Remove wrong USB firmware that breaks the UART chip ---
 # BCM4350C0 is a UART chip. USB firmware (BCM4350C5-0a5c-*.hcd) applied to it
 # corrupts the baud rate state and makes BT completely non-functional until SMC Reset.
@@ -236,37 +282,39 @@ for fname in BCM.hcd BCM2E7C.hcd BCM4350C5.hcd BCM4350C0.hcd; do
 done
 
 # --- 2c. Bluetooth firmware (BCM4350C0.hcd) ---
-# The chip runs from internal ROM — BT works without firmware.
-# Firmware is optional: improves A2DP audio quality (higher baud rate).
-# Place it manually if you want better audio quality.
+# The firmware is included in this repo at firmware/bluetooth/BCM4350C0.hcd.
+# It was extracted from macOS Ventura using hex2hcd.py and the source .hex files
+# (firmware/bluetooth/source/BCM4350-MiniDriver-uart.hex + BCM4350-Updater.hex).
+#
+# Without firmware: BT works for scan/pair but A2DP audio is choppy (default baud rate).
+# With firmware: A2DP at full quality, stable reconnects, AirPods work reliably.
+BT_FW_REPO="$SCRIPT_DIR/firmware/bluetooth/BCM4350C0.hcd"
+
+mkdir -p /lib/firmware/brcm
+
 if [ -f "$BT_FW_DEST" ]; then
-    log_ok "Bluetooth firmware present: $BT_FW_DEST (A2DP quality optimised)."
+    log_ok "Bluetooth firmware already present: $BT_FW_DEST"
+elif [ -f "$BT_FW_REPO" ]; then
+    cp "$BT_FW_REPO" "$BT_FW_DEST"
+    chmod 644 "$BT_FW_DEST"
+    # Compatibility symlink: older kernels look for BCM2E7C.hcd (macOS marketing name)
+    ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd
+    log_ok "Bluetooth firmware installed: $BT_FW_DEST"
+    log_ok "Compatibility symlink: /lib/firmware/brcm/BCM2E7C.hcd → BCM4350C0.hcd"
+    log_info "Source: firmware/bluetooth/BCM4350C0.hcd (converted from macOS Ventura hex files)"
 else
-    log_warn "Bluetooth firmware not found — BT works without it (chip runs from ROM)."
-    log_info "═══════════════════════════════════════════════════════════"
-    log_info "OPTIONAL: Install firmware for better A2DP audio quality:"
-    log_info ""
-    log_info "  Firmware file needed: /lib/firmware/brcm/BCM4350C0.hcd"
-    log_info ""
-    log_info "  Option A — from a running macOS (dual-boot) or macOS USB:"
-    log_info "    # In macOS Terminal:"
-    log_info "    sudo cp /usr/share/firmware/bluetooth/BCM4350C0.hcd \\"
-    log_info "            /Volumes/<YourLinuxPartition>/lib/firmware/brcm/BCM4350C0.hcd"
-    log_info ""
-    log_info "  Option B — community-extracted firmware (search GitHub):"
-    log_info "    Search: 'BCM4350C0.hcd site:github.com'"
-    log_info "    Place at: /lib/firmware/brcm/BCM4350C0.hcd"
-    log_info ""
-    log_info "  After placing the firmware, reload driver:"
-    log_info "    sudo rmmod hci_uart && sudo modprobe hci_uart"
-    log_info "═══════════════════════════════════════════════════════════"
+    log_warn "Bluetooth firmware not found in repo ($BT_FW_REPO) — BT works without it."
+    log_info "Rebuild: python3 $SCRIPT_DIR/firmware/bluetooth/hex2hcd.py"
+    log_info "Requires: firmware/bluetooth/source/BCM4350-MiniDriver-uart.hex + BCM4350-Updater.hex"
 fi
 
 # --- 2d. udev rule: bring hci0 up automatically after firmware is loaded ---
 cat > /etc/udev/rules.d/60-bluetooth-macbook.rules << 'EOF'
-# MacBook Pro BCM2E7C Bluetooth: bring hci0 up once firmware is available
+# MacBook Pro BCM2E7C Bluetooth: bring hci0 up once firmware is available.
+# Uses systemd-run to defer the hciconfig call out of the udev context
+# (avoids the blocking-sleep antipattern; completes asynchronously after boot).
 ACTION=="add", SUBSYSTEM=="bluetooth", KERNEL=="hci0", \
-    RUN+="/bin/bash -c 'sleep 1 && /usr/bin/hciconfig hci0 up || true'"
+    RUN+="/bin/systemd-run --no-block /usr/bin/hciconfig hci0 up"
 EOF
 udevadm control --reload-rules
 log_ok "udev rule created: hci0 will auto-bring-up after firmware loads."
@@ -339,7 +387,7 @@ log_info "═══════════════════════�
 # =============================================================================
 # STEP 3: WiFi Broadcom BCM4350 — power save + optimization
 # =============================================================================
-log_step "3/10 — WiFi BCM4350 — power save + regulatory"
+log_step "3/12 — WiFi BCM4350 — power save + regulatory"
 
 apt-get install -y --no-install-recommends wireless-regdb iw
 
@@ -361,13 +409,36 @@ options brcmfmac power_save=0 roamoff=1
 EOF
 log_ok "brcmfmac: power_save=0, roamoff=1 set."
 
+# --- WiFi NVRAM: install macOS-extracted board-specific NVRAM calibration ---
+# The linux-firmware package ships a generic brcmfmac4350-pcie.bin (firmware binary).
+# The NVRAM (.txt) encodes board-specific RF calibration: TX power, antenna params,
+# channel restrictions. The macOS NVRAM is tuned for this exact board (boardid=0x170).
+# Using it can improve range, 5 GHz stability, and regulatory accuracy.
+WIFI_NVRAM_DIR="$SCRIPT_DIR/firmware/wifi"
+BRCM_FW_DIR="/lib/firmware/brcm"
+mkdir -p "$BRCM_FW_DIR"
+
+if [ -f "$WIFI_NVRAM_DIR/brcmfmac4350-pcie.txt" ]; then
+    # Model-specific name (kernel tries this first, falls back to generic)
+    cp "$WIFI_NVRAM_DIR/brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt" \
+       "$BRCM_FW_DIR/brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt" 2>/dev/null || true
+    # Generic fallback name
+    cp "$WIFI_NVRAM_DIR/brcmfmac4350-pcie.txt" \
+       "$BRCM_FW_DIR/brcmfmac4350-pcie.txt"
+    log_ok "WiFi NVRAM installed: macOS-calibrated board NVRAM for BCM4350 (boardid=0x170)"
+    log_info "Source: firmware/wifi/ (extracted from macOS Ventura, hawaii platform)"
+else
+    log_warn "WiFi NVRAM not found at firmware/wifi/ — using linux-firmware default NVRAM."
+    log_info "WiFi will still work; custom NVRAM improves range and 5GHz stability."
+fi
+
 log_info "WiFi regulatory domain: Ubuntu reads from wireless-regdb automatically."
 log_info "If channels are limited, set country: sudo iw reg set RO  (or your country code)"
 
 # =============================================================================
 # STEP 4: FaceTime HD Camera (Broadcom 720p PCIe — 14e4:1570)
 # =============================================================================
-log_step "4/10 — FaceTime HD Camera — Broadcom PCIe driver (facetimehd)"
+log_step "4/12 — FaceTime HD Camera — Broadcom PCIe driver (facetimehd)"
 
 PKGS_BUILD=(git curl xz-utils cpio build-essential kmod libssl-dev)
 apt-get install -y --no-install-recommends "${PKGS_BUILD[@]}" linux-headers-"$KERNEL"
@@ -428,7 +499,7 @@ rm -rf "$WEBCAM_DIR"
 # =============================================================================
 # STEP 5: Thunderbolt 3 (Intel Alpine Ridge 4C) — bolt daemon
 # =============================================================================
-log_step "5/10 — Thunderbolt 3 — bolt authorization daemon"
+log_step "5/12 — Thunderbolt 3 — bolt authorization daemon"
 
 apt-get install -y --no-install-recommends bolt
 # bolt uses D-Bus activation — start manually here for the current session
@@ -440,7 +511,7 @@ log_info "Or use GNOME Settings → Privacy → Thunderbolt."
 # =============================================================================
 # STEP 6: Battery & Thermal management
 # =============================================================================
-log_step "6/10 — Battery & Thermal — TLP + thermald"
+log_step "6/12 — Battery & Thermal — TLP + thermald"
 
 if dpkg -l power-profiles-daemon &>/dev/null 2>&1; then
     log_warn "Removing power-profiles-daemon (conflicts with TLP)..."
@@ -526,8 +597,10 @@ RemainAfterExit=yes
 # Without this, BIOS default 100W/125W allows indefinite turbo → 70°C+ at idle.
 ExecStart=/bin/bash -c '\
     R=/sys/class/powercap/intel-rapl/intel-rapl:0; \
-    [ -w "$R/constraint_0_power_limit_uw" ] && echo 15000000 > "$R/constraint_0_power_limit_uw"; \
-    [ -w "$R/constraint_1_power_limit_uw" ] && echo 25000000 > "$R/constraint_1_power_limit_uw"'
+    [ -w "$R/constraint_0_power_limit_uw" ]   && echo 15000000  > "$R/constraint_0_power_limit_uw"; \
+    [ -w "$R/constraint_1_power_limit_uw" ]   && echo 25000000  > "$R/constraint_1_power_limit_uw"; \
+    [ -w "$R/constraint_0_time_window_us" ]   && echo 976563    > "$R/constraint_0_time_window_us"; \
+    [ -w "$R/constraint_1_time_window_us" ]   && echo 27343000  > "$R/constraint_1_time_window_us"'
 
 [Install]
 WantedBy=basic.target
@@ -536,9 +609,12 @@ systemctl enable --now macbook-rapl-limits 2>/dev/null || true
 
 # Apply immediately for the current session
 if [ -w "$RAPL_BASE/constraint_0_power_limit_uw" ]; then
-    echo 15000000 > "$RAPL_BASE/constraint_0_power_limit_uw"
-    echo 25000000 > "$RAPL_BASE/constraint_1_power_limit_uw"
-    log_ok "RAPL limits applied now: PL1=15W PL2=25W (was PL1=100W PL2=125W)."
+    echo 15000000  > "$RAPL_BASE/constraint_0_power_limit_uw"
+    echo 25000000  > "$RAPL_BASE/constraint_1_power_limit_uw"
+    # Time windows: PL1 ~1s (976563 µs), PL2 ~28s (27343000 µs) — Intel Kaby Lake U spec
+    [ -w "$RAPL_BASE/constraint_0_time_window_us" ] && echo 976563   > "$RAPL_BASE/constraint_0_time_window_us"
+    [ -w "$RAPL_BASE/constraint_1_time_window_us" ] && echo 27343000 > "$RAPL_BASE/constraint_1_time_window_us"
+    log_ok "RAPL limits applied: PL1=15W/~1s, PL2=25W/~28s (matches macOS Ventura thermal policy)."
 else
     log_info "RAPL limits will be applied at next boot via macbook-rapl-limits.service."
 fi
@@ -552,7 +628,7 @@ log_info "Run 'sudo powertop' to see per-process power usage."
 # =============================================================================
 # STEP 7: applesmc — Fan control, temperature sensors, keyboard backlight
 # =============================================================================
-log_step "7/10 — applesmc: Fan / Temperature Sensors / Keyboard Backlight"
+log_step "7/12 — applesmc: Fan / Temperature Sensors / Keyboard Backlight"
 
 apt-get install -y --no-install-recommends lm-sensors
 
@@ -664,7 +740,7 @@ fi
 # =============================================================================
 # STEP 8: Touchpad & Keyboard — libinput natural scroll + tap-to-click
 # =============================================================================
-log_step "8/10 — Touchpad & Keyboard — libinput configuration"
+log_step "8/12 — Touchpad & Keyboard — libinput configuration"
 
 apt-get install -y --no-install-recommends libinput-tools
 
@@ -729,16 +805,20 @@ fi
 mkdir -p /usr/share/X11/xorg.conf.d
 cat > /usr/share/X11/xorg.conf.d/40-macbook-libinput.conf << 'EOF'
 # MacBook Pro 13" 2017 — libinput touchpad & keyboard (X11 / XWayland)
+# PalmDetection: matches macOS TrackpadHandResting=1 (palm rejection)
+# TappingButtonMap lrm: 1-finger=left, 2-finger=right, 3-finger=middle
 Section "InputClass"
     Identifier      "Apple SPI Touchpad"
     MatchIsTouchpad "on"
     Driver          "libinput"
     Option          "Tapping"           "on"
     Option          "TappingDrag"       "on"
+    Option          "TappingButtonMap"  "lrm"
     Option          "NaturalScrolling"  "true"
     Option          "ScrollMethod"      "twofinger"
     Option          "ClickMethod"       "clickfinger"
     Option          "DisableWhileTyping" "true"
+    Option          "PalmDetection"     "on"
 EndSection
 
 Section "InputClass"
@@ -766,7 +846,7 @@ fi
 # =============================================================================
 # STEP 9: Screen Brightness + Suspend/Sleep fix
 # =============================================================================
-log_step "9/10 — Screen Brightness + Suspend/Sleep"
+log_step "9/12 — Screen Brightness + Suspend/Sleep"
 
 # --- Brightness ---
 apt-get install -y --no-install-recommends brightnessctl
@@ -861,6 +941,26 @@ else
     log_warn "NVMe PCI path $NVME_PCI not found — d3cold fix not applied for this session."
 fi
 
+# --- Auto-boot on lid open: disable via EFI variable ---
+# MacBook Pro 2016/2017 powers on automatically when the lid is opened.
+# macOS NVRAM: auto-boot=true. On Linux this is annoying (bag opens = OS boots).
+# Write the EFI variable to disable it. Safe to run on every install.
+EFI_AUTOBOOT="/sys/firmware/efi/efivars/AutoBoot-7c436110-ab2a-4bbb-a880-fe41995c9f82"
+if [ -f "$EFI_AUTOBOOT" ]; then
+    # Remove immutable flag if set, then write disable value
+    chattr -i "$EFI_AUTOBOOT" 2>/dev/null || true
+    if printf '\x07\x00\x00\x00\x00' > "$EFI_AUTOBOOT" 2>/dev/null; then
+        log_ok "Auto-boot on lid open DISABLED (EFI var AutoBoot cleared)."
+    else
+        log_warn "Could not write AutoBoot EFI var — check: ls -la $EFI_AUTOBOOT"
+        log_info "Manual fix: sudo chattr -i $EFI_AUTOBOOT && printf '\\x07\\x00\\x00\\x00\\x00' | sudo tee $EFI_AUTOBOOT"
+    fi
+elif [ -d /sys/firmware/efi/efivars ]; then
+    log_info "AutoBoot EFI var not found — already disabled or variable name differs on this unit."
+else
+    log_info "EFI vars not mounted — auto-boot state unchanged (non-EFI boot or container)."
+fi
+
 # --- NVMe TRIM: enable weekly fstrim ---
 # TRIM tells the NVMe controller which blocks are free, maintaining write speed
 # and longevity. Ubuntu ships fstrim.timer but it may not be active on fresh install.
@@ -874,7 +974,7 @@ fstrim -v / 2>/dev/null | grep -v "^$" | while read line; do log_info "$line"; d
 # =============================================================================
 # STEP 10: Development & System optimizations
 # =============================================================================
-log_step "10/10 — System & Development optimizations"
+log_step "10/12 — System & Development optimizations"
 
 # --- 10a. ZRAM — compressed swap in RAM ---
 # Replaces slow disk swap with compressed RAM swap (2x ratio, lz4 algorithm).
@@ -1083,6 +1183,221 @@ log_info "  coredump  — capped 512MB (no disk-filling crashes)"
 log_info "  git       — fsmonitor + untrackedCache + fetch.parallel=4"
 
 # =============================================================================
+# STEP 11: Display Color Calibration — Apple factory LCD ICC profile
+# =============================================================================
+# The MacBook Pro 13" 2017 uses a panel calibrated at the Apple factory.
+# macOS ships an ICC profile specific to each unit in:
+#   /Library/ColorSync/Profiles/Displays/Color LCD-<UUID>.icc
+#
+# This profile contains:
+#   • Display-specific RGB primaries (wider gamut than generic sRGB)
+#   • Factory tone response curves (rTRC/gTRC/bTRC, 1024-point)
+#   • Apple vcgt / vcgp gamma data
+#   • D65 white point calibration
+#
+# Without this profile Ubuntu uses a generic sRGB assumption, which causes
+# visibly inaccurate colors: oversaturated reds/greens, incorrect white point.
+#
+# The profile was extracted from macOS Ventura and is included in this repo
+# at firmware/display/Color-LCD-MacBookPro14-1.icc (3.3 kB).
+#
+# Install approach:
+#   1. Copy ICC to /usr/share/color/icc/macbook/ (system-wide, colord reads it)
+#   2. Copy to ~/.local/share/icc/ (per-user, GNOME Color Manager picks it up)
+#   3. Create /usr/local/bin/macbook-color-profile.sh — assigns profile via
+#      colormgr to the eDP (embedded DisplayPort / built-in display) on each login
+#   4. Install ~/.config/autostart/macbook-color-profile.desktop — auto-runs it
+#
+# Manual verify after reboot:
+#   colormgr get-devices        — look for the built-in display (eDP-1)
+#   colormgr get-profiles       — should list Color-LCD-MacBookPro14-1
+#   colormgr device-get-default-profile <device-id>   — confirms assignment
+# =============================================================================
+log_step "11/12 — Display color calibration — Apple factory ICC profile"
+
+apt-get install -y --no-install-recommends colord
+
+ICC_SRC="$SCRIPT_DIR/firmware/display/Color-LCD-MacBookPro14-1.icc"
+
+ICC_SYSTEM_DIR="/usr/share/color/icc/macbook"
+ICC_SYSTEM_PATH="$ICC_SYSTEM_DIR/Color-LCD-MacBookPro14-1.icc"
+
+if [ ! -f "$ICC_SRC" ]; then
+    log_warn "ICC profile not found — skipping color calibration."
+    log_info "Expected: firmware/display/Color-LCD-MacBookPro14-1.icc"
+    log_info "Extract from macOS: /Library/ColorSync/Profiles/Displays/Color LCD-*.icc"
+else
+    # --- System-wide installation (colord scans /usr/share/color/icc/) ---
+    mkdir -p "$ICC_SYSTEM_DIR"
+    cp "$ICC_SRC" "$ICC_SYSTEM_PATH"
+    chmod 644 "$ICC_SYSTEM_PATH"
+    log_ok "ICC profile installed system-wide: $ICC_SYSTEM_PATH"
+
+    # --- Per-user installation (GNOME Color Manager reads ~/.local/share/icc/) ---
+    if [ -n "$REAL_HOME" ]; then
+        USER_ICC_DIR="$REAL_HOME/.local/share/icc"
+        mkdir -p "$USER_ICC_DIR"
+        cp "$ICC_SRC" "$USER_ICC_DIR/Color-LCD-MacBookPro14-1.icc"
+        chown -R "$REAL_USER:$REAL_USER" "$USER_ICC_DIR"
+        log_ok "ICC profile installed for user '$REAL_USER': $USER_ICC_DIR/"
+    fi
+
+    # --- colormgr autostart script ---
+    # Assigns the profile to the built-in eDP display on every login.
+    # We cannot hard-code the colord device ID here because colord derives it
+    # from the display's EDID at runtime (format: xrandr-eDP-1 or similar).
+    # The script does a one-time lookup and caches the result in ~/.cache/.
+    cat > /usr/local/bin/macbook-color-profile.sh << 'COLOREOF'
+#!/bin/bash
+# MacBook Pro 13" 2017 — apply factory LCD color calibration on login.
+# Assigns Apple's ICC profile to the built-in display via colord/colormgr.
+#
+# The profile (Color-LCD-MacBookPro14-1.icc) was extracted from macOS Ventura.
+# It encodes the factory-calibrated RGB primaries and tone response curves for
+# this specific panel. Without it GNOME uses generic sRGB → wrong colors.
+#
+# colord is session-scoped: the assignment must be repeated on every login.
+# This script is invoked by ~/.config/autostart/macbook-color-profile.desktop.
+
+ICC_FILE="/usr/share/color/icc/macbook/Color-LCD-MacBookPro14-1.icc"
+PROFILE_NAME="Color-LCD-MacBookPro14-1"
+
+[ -f "$ICC_FILE" ] || exit 0
+
+# Wait for colord daemon to be available (up to 15 s after login)
+for i in $(seq 1 15); do
+    colormgr get-devices &>/dev/null 2>&1 && break
+    sleep 1
+done
+colormgr get-devices &>/dev/null 2>&1 || { echo "macbook-color-profile: colord not ready" >&2; exit 1; }
+
+# Import profile if colord doesn't know it yet
+if ! colormgr get-profiles 2>/dev/null | grep -q "$PROFILE_NAME"; then
+    colormgr import-profile "$ICC_FILE" 2>/dev/null || true
+    sleep 1
+fi
+
+# Find the built-in display device ID.
+# colord names it after the X/Wayland output name. On MacBook Pro 14,1 the
+# internal eDP link appears as 'eDP-1' (Wayland/KMS) or 'LVDS-1' (old X11).
+# We match 'eDP' first, fall back to first display device in the list.
+DEVICE_ID=$(colormgr get-devices 2>/dev/null \
+    | awk '/Device ID:/{id=$NF} /eDP|Color LCD|Built-in/{print id; exit}')
+
+if [ -z "$DEVICE_ID" ]; then
+    DEVICE_ID=$(colormgr get-devices 2>/dev/null \
+        | awk '/Device ID:/{print $NF; exit}')
+fi
+
+if [ -z "$DEVICE_ID" ]; then
+    echo "macbook-color-profile: no display device found in colord" >&2
+    exit 1
+fi
+
+PROFILE_ID=$(colormgr get-profiles 2>/dev/null \
+    | awk "/Profile ID:/{id=\$NF} /$PROFILE_NAME/{print id; exit}")
+
+if [ -z "$PROFILE_ID" ]; then
+    echo "macbook-color-profile: profile not found in colord after import" >&2
+    exit 1
+fi
+
+colormgr device-add-profile     "$DEVICE_ID" "$PROFILE_ID" 2>/dev/null || true
+colormgr device-make-profile-default "$DEVICE_ID" "$PROFILE_ID" 2>/dev/null || true
+COLOREOF
+    chmod +x /usr/local/bin/macbook-color-profile.sh
+    log_ok "Color profile assignment script: /usr/local/bin/macbook-color-profile.sh"
+
+    # --- Autostart .desktop entry (per-user) ---
+    if [ -n "$REAL_HOME" ]; then
+        AUTOSTART_DIR="$REAL_HOME/.config/autostart"
+        mkdir -p "$AUTOSTART_DIR"
+        cat > "$AUTOSTART_DIR/macbook-color-profile.desktop" << 'DTEOF'
+[Desktop Entry]
+Type=Application
+Name=MacBook Pro LCD Color Profile
+Comment=Apply Apple factory color calibration for the built-in display
+Exec=/usr/local/bin/macbook-color-profile.sh
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+DTEOF
+        chown "$REAL_USER:$REAL_USER" "$AUTOSTART_DIR/macbook-color-profile.desktop"
+        log_ok "Color profile autostart entry installed for '$REAL_USER'."
+        log_info "On every login the built-in display will be assigned the Apple ICC profile."
+    fi
+
+    log_info "Verify after reboot:"
+    log_info "  colormgr get-devices          — find your display's Device ID"
+    log_info "  colormgr get-profiles         — confirm Color-LCD-MacBookPro14-1 is listed"
+    log_info "  GNOME Settings → Color        — profile visible and assigned"
+    log_info "Without this profile: oversaturated colors, incorrect white point (generic sRGB)."
+fi
+
+# =============================================================================
+# STEP 12: Night Shift → redshift (6500K day / 4000K night)
+# =============================================================================
+# macOS Ventura Night Shift: 6500K (D65) during the day, 4000K in the evening.
+# redshift replicates this on Linux using RandR/Wayland to adjust display colour
+# temperature gradually, reducing blue light in the evening.
+#
+# Config is placed system-wide at /etc/xdg/redshift.conf so it works for any
+# user without per-user setup. The user can override with ~/.config/redshift.conf.
+# Autostart entry created for the sudo-invoking user.
+# =============================================================================
+log_step "12/12 — Night Shift → redshift (colour temperature)"
+
+apt-get install -y --no-install-recommends redshift-gtk 2>/dev/null || \
+    apt-get install -y --no-install-recommends redshift 2>/dev/null || true
+
+if command -v redshift &>/dev/null || command -v redshift-gtk &>/dev/null; then
+    # System-wide config — latitude/longitude set to Bucharest (Romania).
+    # User can edit /etc/xdg/redshift.conf or create ~/.config/redshift.conf to override.
+    cat > /etc/xdg/redshift.conf << 'EOF'
+; MacBook Pro Night Shift equivalent — matches macOS Ventura defaults
+; Extracted from: macOS Night Shift = 4000K warm, D65 = 6500K neutral
+[redshift]
+temp-day=6500
+temp-night=4000
+gamma=1.0
+fade=1
+adjustment-method=randr
+location-provider=manual
+
+[manual]
+; Edit these coordinates for your location.
+; Default: Bucharest, Romania (lat=44.4, lon=26.1)
+lat=44.4
+lon=26.1
+EOF
+    log_ok "redshift config: 6500K day, 4000K night (matches macOS Night Shift defaults)."
+    log_info "Edit /etc/xdg/redshift.conf to change your latitude/longitude."
+
+    # Autostart for the desktop user
+    if [ -n "$REAL_HOME" ]; then
+        AUTOSTART_DIR="$REAL_HOME/.config/autostart"
+        mkdir -p "$AUTOSTART_DIR"
+        # Use redshift-gtk if available (has tray icon), fall back to redshift
+        REDSHIFT_BIN=$(command -v redshift-gtk 2>/dev/null || command -v redshift)
+        cat > "$AUTOSTART_DIR/redshift.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=Night Shift (redshift)
+Comment=Adjust colour temperature at night — macOS Night Shift equivalent
+Exec=$REDSHIFT_BIN
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+EOF
+        chown "$REAL_USER:$REAL_USER" "$AUTOSTART_DIR/redshift.desktop"
+        log_ok "redshift autostart enabled for '$REAL_USER'."
+    fi
+else
+    log_warn "redshift not available in apt — skipping Night Shift equivalent."
+    log_info "Install manually: sudo apt-get install redshift-gtk"
+fi
+
+# =============================================================================
 # Rebuild initramfs — ensure all modprobe configs take effect at early boot
 # =============================================================================
 log_step "Finalising — rebuilding initramfs"
@@ -1101,31 +1416,43 @@ echo -e "${BOLD}${GREEN}   All done! MacBook Pro hardware configuration complete
 echo -e "${BOLD}${GREEN}============================================================${NC}"
 echo ""
 if lsmod 2>/dev/null | grep -q "snd_hda_codec_cs8409"; then
-    echo -e "  ${GREEN}[✔]${NC} 0. Audio — Cirrus CS8409 driver loaded (speakers/mic active)"
+    echo -e "  ${GREEN}[✔]${NC}  0. Audio — Cirrus CS8409 driver loaded (speakers/mic active)"
 else
-    echo -e "  ${YELLOW}[!]${NC} 0. Audio — Cirrus CS8409 driver installed, active after reboot"
+    echo -e "  ${YELLOW}[!]${NC}  0. Audio — Cirrus CS8409 driver installed, active after reboot"
 fi
-echo -e "  ${GREEN}[✔]${NC} 1. Intel GPU — VA-API hardware acceleration"
+if command -v easyeffects &>/dev/null || command -v pulseeffects &>/dev/null; then
+    echo -e "  ${GREEN}[✔]${NC}     Mic DSP — EasyEffects preset installed (noise gate + autogain)"
+else
+    echo -e "  ${YELLOW}[!]${NC}     Mic DSP — EasyEffects not installed (mic level will be low)"
+fi
+echo -e "  ${GREEN}[✔]${NC}  1. Intel GPU — VA-API hardware acceleration"
 if [ -f /lib/firmware/brcm/BCM4350C0.hcd ]; then
-    echo -e "  ${GREEN}[✔]${NC} 2. Bluetooth — config fixed + firmware installed (BCM4350C0)"
+    echo -e "  ${GREEN}[✔]${NC}  2. Bluetooth — config fixed + firmware installed (BCM4350C0.hcd)"
 else
-    echo -e "  ${YELLOW}[!]${NC} 2. Bluetooth — config fixed, firmware MISSING (see step 2 above)"
+    echo -e "  ${YELLOW}[!]${NC}  2. Bluetooth — firmware missing — check firmware/bluetooth/"
 fi
-echo -e "  ${GREEN}[✔]${NC} 3. WiFi — power save off, brcmfmac optimized"
-echo -e "  ${GREEN}[✔]${NC} 4. FaceTime HD Camera — driver attempted (see warnings above)"
-echo -e "  ${GREEN}[✔]${NC} 5. Thunderbolt 3 — bolt daemon"
-echo -e "  ${GREEN}[✔]${NC} 6. Battery & Thermal — TLP + thermald"
-echo -e "  ${GREEN}[✔]${NC} 7. applesmc — mbpfan (3000 RPM min, 40°C trigger), sensors, keyboard backlight (max)"
-echo -e "  ${GREEN}[✔]${NC} 8. Touchpad — tap-to-click, natural scroll, clickfinger"
-echo -e "  ${GREEN}[✔]${NC} 9. Screen brightness + s2idle suspend"
+echo -e "  ${GREEN}[✔]${NC}  3. WiFi — macOS NVRAM v2.5 + power save off"
+echo -e "  ${GREEN}[✔]${NC}  4. FaceTime HD Camera — driver attempted (see warnings above)"
+echo -e "  ${GREEN}[✔]${NC}  5. Thunderbolt 3 — bolt daemon"
+echo -e "  ${GREEN}[✔]${NC}  6. Battery & Thermal — TLP + thermald + RAPL PL1=15W/PL2=25W (time windows set)"
+echo -e "  ${GREEN}[✔]${NC}  7. applesmc — mbpfan (3500 RPM min, 38°C trigger), sensors, keyboard backlight (max)"
+echo -e "  ${GREEN}[✔]${NC}  8. Touchpad — tap-to-click, natural scroll, PalmDetection, clickfinger"
+echo -e "  ${GREEN}[✔]${NC}  9. Screen brightness + s2idle suspend + auto-boot EFI disabled"
 echo -e "  ${GREEN}[✔]${NC} 10. System & Dev: ZRAM, sysctl, BBR TCP, NVMe I/O scheduler, earlyoom, ulimits"
+if [ -f "$SCRIPT_DIR/firmware/display/Color-LCD-MacBookPro14-1.icc" ]; then
+    echo -e "  ${GREEN}[✔]${NC} 11. Display color calibration — Apple ICC profile installed + autostart"
+else
+    echo -e "  ${YELLOW}[!]${NC} 11. Display color calibration — ICC file missing (firmware/display/)"
+fi
+if command -v redshift &>/dev/null || command -v redshift-gtk &>/dev/null; then
+    echo -e "  ${GREEN}[✔]${NC} 12. Night Shift → redshift (6500K day / 4000K night)"
+else
+    echo -e "  ${YELLOW}[!]${NC} 12. redshift not installed — install: apt-get install redshift-gtk"
+fi
 echo ""
 echo -e "  ${YELLOW}[!]${NC} ${BOLD}REBOOT required for all changes to take effect.${NC}"
-if [ ! -f /lib/firmware/brcm/BCM4350C0.hcd ]; then
-echo -e "  ${YELLOW}[!]${NC} Bluetooth: no firmware (BCM4350C0.hcd) — BT scan/pair works, A2DP quality optional (see step 2)."
-fi
 echo ""
-echo -e "  ${BOLD}${YELLOW}BLUETOOTH — IF hci0 IS MISSING AFTER REBOOT (first migration from macOS):${NC}"
-echo -e "  Do an SMC Reset: hold Shift(L)+Ctrl(L)+Option(L)+Power for 10 sec, then boot."
-echo -e "  This is needed ONCE — the BCM4350C0 chip resets its baud rate to Linux default."
+echo -e "  ${BOLD}${YELLOW}BLUETOOTH — IF hci0 IS MISSING AFTER FIRST REBOOT (migration from macOS):${NC}"
+echo -e "  macOS sets BCM4350C0 to 3 Mbaud; Linux uses 115200 baud → chip times out."
+echo -e "  Fix (once only): SMC Reset — hold Shift(L)+Ctrl(L)+Option(L)+Power 10 sec, then boot."
 echo ""

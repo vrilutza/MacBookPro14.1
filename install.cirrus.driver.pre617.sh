@@ -3,7 +3,7 @@
 # NOTA BENE - this script should be run as root
 # Handles kernels older than 6.17 on Ubuntu.
 
-set -e
+set -euo pipefail
 
 usage() {
     cat << EOF
