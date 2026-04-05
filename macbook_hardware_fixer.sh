@@ -682,29 +682,44 @@ log_ok "smartmontools enabled (SSD/NVMe temperature monitoring)."
 MONITOR_SCRIPT="/usr/local/bin/macbook-monitor"
 cat > "$MONITOR_SCRIPT" << 'MONEOF'
 #!/bin/bash
-# MacBook Pro — live fan + temperature monitor (Ctrl+C to quit)
-LOW=40; HIGH=50; MAX=55
-color_t() { t=$1
-  (( t < LOW )) && echo -e "\e[32m${t}°C\e[0m" && return
-  (( t < HIGH )) && echo -e "\e[33m${t}°C\e[0m" && return
-  (( t < MAX ))  && echo -e "\e[31m${t}°C\e[0m" && return
-  echo -e "\e[41;97m${t}°C CRITICAL\e[0m"
+# MacBook Pro 13" 2017 — live fan + temperature monitor (Ctrl+C to quit)
+# Thresholds match /etc/mbpfan.conf: low_temp=38, high_temp=46, max_temp=52
+
+# Thresholds from mbpfan.conf
+LOW=38; HIGH=46; MAX=52
+
+color_t() {
+  t=$1
+  (( t < LOW  )) && echo -e "\e[32m${t}°C\e[0m"        && return   # green
+  (( t < HIGH )) && echo -e "\e[33m${t}°C\e[0m"        && return   # yellow
+  (( t < MAX  )) && echo -e "\e[31m${t}°C\e[0m"        && return   # red
+  echo -e "\e[41;97m${t}°C CRITICAL\e[0m"                           # red bg
 }
-color_r() { r=$1
-  (( r < 4000 )) && echo -e "\e[32m${r} RPM\e[0m" && return
-  (( r < 5500 )) && echo -e "\e[33m${r} RPM\e[0m" && return
-  echo -e "\e[31m${r} RPM\e[0m"
+color_r() {
+  r=$1
+  (( r < 4000 )) && echo -e "\e[32m${r} RPM\e[0m"      && return   # green
+  (( r < 5500 )) && echo -e "\e[33m${r} RPM\e[0m"      && return   # yellow
+  echo -e "\e[31m${r} RPM\e[0m"                                      # red
 }
+
 while true; do
   clear
-  echo "=== MacBook Pro Monitor (Ctrl+C to quit) ==="
+  echo "=== MacBook Pro 13\" 2017 Monitor (Ctrl+C to quit) ==="
+  echo "  mbpfan thresholds: low=${LOW}°C  high=${HIGH}°C  max=${MAX}°C"
+  echo ""
+
   FAN=$(cat /sys/devices/platform/applesmc.768/fan1_input 2>/dev/null || echo 0)
-  echo "Fan:  $(color_r $FAN)"
-  sensors 2>/dev/null | grep -E 'Package id 0:|Core [0-9]+:' | while read line; do
-    name=$(echo "$line" | awk -F: '{print $1}')
-    val=$(echo "$line" | grep -oP '[0-9]+(?=\.[0-9]+°C)')
-    [ -n "$val" ] && echo "$name: $(color_t $val)"
+  echo "  Fan1:   $(color_r $FAN)"
+  echo ""
+
+  # Show all coretemp + applesmc sensors with numeric temp values
+  sensors 2>/dev/null | grep -E 'Package id 0:|Core [0-9]+:|TCAL|TC[0-9]|TB[0-9]' | \
+  while IFS= read -r line; do
+    name=$(echo "$line" | awk -F: '{print $1}' | sed 's/^ *//')
+    val=$(echo "$line" | grep -oP '\+?[0-9]+(?=\.[0-9]+°C)' | head -1)
+    [ -n "$val" ] && printf "  %-18s %s\n" "${name}:" "$(color_t $val)"
   done
+
   sleep 1
 done
 MONEOF

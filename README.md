@@ -424,6 +424,41 @@ systemctl status macbook-nvme-d3cold
 
 Reference: https://github.com/Dunedan/mbp-2016-linux#suspend--hibernation
 
+**Hibernate / SuspendThenHibernate (optional — not configured by the script):**
+
+macOS uses `hibernatemode=3` (hybrid sleep): RAM stays powered AND is saved to disk.
+After ~3 hours on battery (`standbydelaylow=10800`) the machine enters full hibernate.
+
+On Linux this is not configured because:
+- Hibernate requires a swap partition or swap file **≥ RAM size** (16 GB for this Mac)
+- The Apple SSD NVMe controller's behaviour under hibernation is not well tested
+- s2idle (`mem_sleep_default=s2idle`) works reliably and is sufficient for daily use
+
+If you want to enable `SuspendThenHibernate` manually on Ubuntu 26.04:
+```bash
+# 1. Create a swap file >= your RAM size (e.g., 16 GB)
+sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# 2. Get swap file offset (needed for hibernation resume)
+sudo filefrag -v /swapfile | awk 'NR==4{print $4}' | tr -d '.'
+
+# 3. Add to GRUB_CMDLINE_LINUX_DEFAULT in /etc/default/grub:
+#    resume=/dev/nvme0n1p2 resume_offset=<offset_from_step_2>
+# 4. Enable SuspendThenHibernate
+sudo systemctl enable systemd-hibernate-resume@$(findmnt -n -o SOURCE /)
+echo 'HandleLidSwitch=suspend-then-hibernate' | sudo tee /etc/systemd/logind.conf.d/hibernate.conf
+sudo mkdir -p /etc/systemd/logind.conf.d
+sudo tee /etc/systemd/sleep.conf.d/hibernate.conf << 'EOF'
+[Sleep]
+HibernateDelaySec=10800
+EOF
+```
+
+> **Note:** On MacBook Pro 14,1 the NVMe controller is Apple-proprietary (not standard NVMe).
+> Hibernate has not been tested on this specific hardware. Proceed at your own risk.
+
 ---
 
 ### 10. Audio — Cirrus Logic CS8409
