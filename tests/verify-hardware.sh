@@ -694,7 +694,7 @@ step "10/12 — System & Development optimizations"
 # ZRAM
 if zramctl 2>/dev/null | grep -q "^/dev/zram"; then
     pass "ZRAM swap active (compressed RAM swap)"
-    ZRAM_INFO=$(zramctl --noheadings --output NAME,SIZE,USED,COMP 2>/dev/null | head -1)
+    ZRAM_INFO=$(zramctl --noheadings --output NAME,SIZE,USED,ALGORITHM 2>/dev/null | head -1)
     info "ZRAM: $ZRAM_INFO"
 elif [ -f /etc/systemd/zram-generator.conf ]; then
     warn "ZRAM config present but no /dev/zram device active — takes effect after reboot"
@@ -765,9 +765,16 @@ fi
 # i915 FBC + PSR
 if [ -f /etc/modprobe.d/i915-macbook.conf ] && grep -q "enable_fbc=1" /etc/modprobe.d/i915-macbook.conf; then
     pass "i915: FBC + PSR enabled (GPU power optimisations)"
-    # Check if actually active in current session
-    FBC=$(cat /sys/kernel/debug/dri/0/i915_fbc_status 2>/dev/null | head -1 || echo "n/a")
-    [ "$FBC" != "n/a" ] && info "i915 FBC status: $FBC"
+    # Check if actually active in current session.
+    # On MacBook Pro 14,1: simpledrm claims card0 at boot; i915 is card1.
+    # Detect the correct DRM node by finding the one owned by i915.
+    I915_DRI=$(ls /sys/kernel/debug/dri/ 2>/dev/null | while read d; do
+        [ -f "/sys/kernel/debug/dri/$d/i915_fbc_status" ] && echo "$d" && break
+    done)
+    if [ -n "$I915_DRI" ]; then
+        FBC=$(cat /sys/kernel/debug/dri/$I915_DRI/i915_fbc_status 2>/dev/null | head -1 || echo "n/a")
+        [ "$FBC" != "n/a" ] && info "i915 FBC status (dri/$I915_DRI): $FBC"
+    fi
 else
     warn "i915 FBC/PSR not configured — GPU using more power than necessary"
 fi

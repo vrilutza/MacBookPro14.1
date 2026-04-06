@@ -441,22 +441,21 @@ else
     log_info "WiFi will still work; custom NVRAM improves range and 5GHz stability."
 fi
 
-# --- WiFi 5GHz preference via NetworkManager ---
-# BCM4350 supports both 2.4GHz and 5GHz. 5GHz has lower congestion, higher
-# throughput (HT40: up to 300 Mbps), and less interference from neighbours.
-# band=a forces 5GHz-only. If the AP is out of range on 5GHz, NM falls back
-# to 2.4GHz automatically (band=a is a preference, not a hard lock).
+# --- WiFi 5GHz preference ---
+# NOTE: NetworkManager conf.d files use legacy key names (e.g. "band") inside
+# named sections like [wifi-<uuid>]. The dotted property form "wifi.band" is only
+# valid inside .nmconnection profile files, NOT in conf.d — NM logs a warning and
+# ignores it. 5GHz band preference must be set per-connection via nmcli or nm-applet.
+# Example: nmcli connection modify "MyWiFi" 802-11-wireless.band a
+# Remove any previously written invalid conf to stop boot warnings.
 NM_WIFI_BAND_CONF="/etc/NetworkManager/conf.d/98-wifi-band-5ghz.conf"
-cat > "$NM_WIFI_BAND_CONF" << 'EOF'
-# MacBook Hardware Fixer: prefer 5GHz band for BCM4350
-# 5GHz = less congestion, higher throughput (HT20/HT40), lower latency.
-# NetworkManager falls back to 2.4GHz if 5GHz AP is not reachable.
-[connection]
-wifi.band=a
-EOF
-log_ok "WiFi: 5GHz band preferred (NM conf 98-wifi-band-5ghz.conf). Falls back to 2.4GHz if needed."
+if [ -f "$NM_WIFI_BAND_CONF" ]; then
+    rm -f "$NM_WIFI_BAND_CONF"
+    log_ok "Removed invalid WiFi band conf (wifi.band=a in conf.d generates NM warning, does nothing)."
+fi
+log_info "WiFi 5GHz: set per-connection with: nmcli connection modify <name> 802-11-wireless.band a"
 
-# Reload NetworkManager config — no disconnect needed, applies at next connection
+# Reload NetworkManager config — no disconnect needed
 nmcli general reload conf 2>/dev/null || true
 
 log_info "WiFi regulatory domain: Ubuntu reads from wireless-regdb automatically."
@@ -543,6 +542,8 @@ log_step "6/12 — Battery & Thermal — TLP + thermald"
 if dpkg -l power-profiles-daemon &>/dev/null 2>&1; then
     log_warn "Removing power-profiles-daemon (conflicts with TLP)..."
     apt-get remove -y power-profiles-daemon 2>/dev/null || true
+    # Reload systemd unit list — apt removal leaves stale unit references without this
+    systemctl daemon-reload 2>/dev/null || true
     log_ok "power-profiles-daemon removed."
 fi
 
@@ -640,15 +641,21 @@ Wants=thermald.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Load RAPL modules so the sysfs tree exists before we write to it.
+# Without this, intel-rapl:0 does not appear and bash [ -w ] returns exit 1,
+# causing the service to fail with Result=exit-code.
+ExecStartPre=/sbin/modprobe -a intel_rapl_msr intel_rapl_common
 # PL1=20W = sweet-spot între TDP stock (15W) și cTDP-up (28W).
 # Susține ~2.8-3.0 GHz fără throttle termic pe heatsink-ul mic al MBP 13" 2017.
 # PL2=40W = burst pentru taskuri scurte (fereastră 28s — suficient pentru orice task interactiv).
+# '; true' ensures bash exits 0 even if some sysfs paths are absent.
 ExecStart=/bin/bash -c '\
     R=/sys/class/powercap/intel-rapl/intel-rapl:0; \
     [ -w "$R/constraint_0_power_limit_uw" ]   && echo 20000000  > "$R/constraint_0_power_limit_uw"; \
     [ -w "$R/constraint_1_power_limit_uw" ]   && echo 40000000  > "$R/constraint_1_power_limit_uw"; \
     [ -w "$R/constraint_0_time_window_us" ]   && echo 976563    > "$R/constraint_0_time_window_us"; \
-    [ -w "$R/constraint_1_time_window_us" ]   && echo 27343000  > "$R/constraint_1_time_window_us"'
+    [ -w "$R/constraint_1_time_window_us" ]   && echo 27343000  > "$R/constraint_1_time_window_us"; \
+    true'
 
 [Install]
 WantedBy=multi-user.target
@@ -685,6 +692,10 @@ cat > /etc/modules-load.d/macbook-sensors.conf << 'EOF'
 # MacBook Pro hardware monitoring modules
 applesmc
 coretemp
+# Intel RAPL power capping — required for /sys/class/powercap/intel-rapl sysfs
+# Without these, macbook-rapl-limits.service fails (sysfs absent at boot)
+intel_rapl_msr
+intel_rapl_common
 EOF
 log_ok "lm-sensors installed, applesmc + coretemp auto-load configured."
 log_info "Run 'sensors' after reboot to see CPU and chassis temperatures."
