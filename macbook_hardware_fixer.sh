@@ -1417,9 +1417,26 @@ apt-get install -y --no-install-recommends redshift-gtk 2>/dev/null || \
     apt-get install -y --no-install-recommends redshift 2>/dev/null || true
 
 if command -v redshift &>/dev/null || command -v redshift-gtk &>/dev/null; then
+    # Detect which DRM card belongs to the Intel GPU (vendor 0x8086).
+    # On kernel >= 5.14 with simpledrm, the EFI framebuffer takes card0 at boot
+    # and the real i915 driver gets card1. simpledrm's card0 is released once i915
+    # takes over, so only card1 remains. On older kernels (no simpledrm) card0 is Intel.
+    INTEL_CARD_NUM=0  # safe default
+    for _card in /sys/class/drm/card[0-9]*; do
+        [[ -d "$_card" ]] || continue
+        _num="${_card##*/card}"
+        [[ "$_num" =~ ^[0-9]+$ ]] || continue
+        _vendor=$(cat "$_card/device/vendor" 2>/dev/null)
+        if [[ "$_vendor" == "0x8086" ]]; then
+            INTEL_CARD_NUM=$_num
+            break
+        fi
+    done
+    log_info "redshift DRM: Intel GPU detected at /dev/dri/card${INTEL_CARD_NUM}"
+
     # System-wide config — latitude/longitude set to Bucharest (Romania).
     # User can edit /etc/xdg/redshift.conf or create ~/.config/redshift.conf to override.
-    cat > /etc/xdg/redshift.conf << 'EOF'
+    cat > /etc/xdg/redshift.conf << EOF
 ; MacBook Pro Night Shift equivalent — matches macOS Ventura defaults
 ; Extracted from: macOS Night Shift = 4000K warm, D65 = 6500K neutral
 [redshift]
@@ -1437,9 +1454,10 @@ lat=44.4
 lon=26.1
 
 [drm]
-; MacBookPro14,1: Intel GPU enumerates as card1 (not card0).
+; Intel GPU card number detected at install time: card${INTEL_CARD_NUM}
+; On kernel >= 5.14 simpledrm takes card0 first; i915 gets card1.
 ; Without this, redshift fails with "Failed to open DRM device: /dev/dri/card0".
-card=1
+card=${INTEL_CARD_NUM}
 EOF
     log_ok "redshift config: 6500K day, 4000K night (matches macOS Night Shift defaults)."
     log_info "Edit /etc/xdg/redshift.conf to change your latitude/longitude."
