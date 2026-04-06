@@ -909,12 +909,27 @@ if [ -f "$REDSHIFT_CONF" ]; then
     else
         warn "redshift temps not set to 6500K/4000K — check $REDSHIFT_CONF"
     fi
-    if grep -q "^card=1" "$REDSHIFT_CONF"; then
-        pass "redshift DRM card override: card=1 (Intel GPU on MacBookPro14,1 is card1)"
+    # Detect the actual Intel GPU card number (same logic as macbook_hardware_fixer.sh)
+    _INTEL_CARD=""
+    for _card in /sys/class/drm/card[0-9]*; do
+        [[ -d "$_card" ]] || continue
+        _num="${_card##*/card}"
+        [[ "$_num" =~ ^[0-9]+$ ]] || continue
+        _vendor=$(cat "$_card/device/vendor" 2>/dev/null)
+        if [[ "$_vendor" == "0x8086" ]]; then
+            _INTEL_CARD=$_num
+            break
+        fi
+    done
+    RS_CARD=$(grep -oP '^card=\K[0-9]+' "$REDSHIFT_CONF" 2>/dev/null)
+    if [ -n "$RS_CARD" ] && [ "$RS_CARD" = "${_INTEL_CARD:-1}" ]; then
+        pass "redshift DRM card override: card=$RS_CARD (Intel GPU on MacBookPro14,1 is card${_INTEL_CARD:-?})"
+    elif [ -n "$RS_CARD" ]; then
+        warn "redshift DRM card=$RS_CARD but Intel GPU is card${_INTEL_CARD:-?} — may fail to start"
+        info "Fix: run macbook_hardware_fixer.sh (step 12 auto-detects the correct card)"
     else
-        fail "redshift DRM card not set to card=1 — will fail with 'Failed to open DRM device: /dev/dri/card0'"
-        info "Fix: add [drm]\ncard=1 to $REDSHIFT_CONF and ~/.config/redshift.conf"
-        info "     sudo cp /tmp/redshift.conf.new /etc/xdg/redshift.conf   (if /tmp file exists)"
+        fail "redshift DRM card not set — will fail with 'Failed to open DRM device'"
+        info "Fix: run macbook_hardware_fixer.sh (step 12 writes [drm] card=N)"
     fi
 else
     warn "redshift system config not found: $REDSHIFT_CONF"

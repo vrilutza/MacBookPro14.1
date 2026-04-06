@@ -588,7 +588,7 @@ CPU_ENERGY_PERF_POLICY_ON_BAT=balance_power
 CPU_HWP_DYN_BOOST_ON_AC=1
 CPU_HWP_DYN_BOOST_ON_BAT=0
 
-# Turbo boost — always ON on AC (sustained 3.6 GHz with RAPL 28W limit below).
+# Turbo boost — always ON on AC (sustained 3.6 GHz with RAPL 20W limit below).
 # OFF on battery: -10 to -15°C under load, significant battery life gain.
 CPU_BOOST_ON_AC=1
 CPU_BOOST_ON_BAT=0
@@ -634,8 +634,11 @@ Description=MacBook Pro i5-7360U RAPL power limits — PL1=20W PL2=40W
 Documentation=https://github.com/Dunedan/mbp-2016-linux
 # Must run AFTER thermald: thermald dynamically manages RAPL via DPTF and will
 # raise PL1 back to BIOS default (100W) if it starts after this service.
-# Running last (multi-user.target) guarantees our limits are the final values.
-After=network.target thermald.service tlp.service
+# NOTE: Do NOT add tlp.service here — on Ubuntu 26.04 TLP orders itself
+# After=multi-user.target, which creates an ordering cycle with our
+# WantedBy=multi-user.target and causes systemd to delete this job entirely.
+# TLP does not touch RAPL, so only thermald ordering matters.
+After=thermald.service
 Wants=thermald.service
 
 [Service]
@@ -742,10 +745,10 @@ MONITOR_SCRIPT="/usr/local/bin/macbook-monitor"
 cat > "$MONITOR_SCRIPT" << 'MONEOF'
 #!/bin/bash
 # MacBook Pro 13" 2017 — live fan + temperature monitor (Ctrl+C to quit)
-# Thresholds match /etc/mbpfan.conf: low_temp=38, high_temp=46, max_temp=52
+# Thresholds match /etc/mbpfan.conf: low_temp=30, high_temp=40, max_temp=48
 
-# Thresholds from mbpfan.conf
-LOW=38; HIGH=46; MAX=52
+# Thresholds from /etc/mbpfan.conf (low_temp=30, high_temp=40, max_temp=48)
+LOW=30; HIGH=40; MAX=48
 
 color_t() {
   t=$1
