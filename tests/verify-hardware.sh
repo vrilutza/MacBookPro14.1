@@ -266,21 +266,41 @@ else
 fi
 
 BRCM_CONF="/etc/modprobe.d/brcmfmac-macbook.conf"
-if [ -f "$BRCM_CONF" ] && grep -q "power_save=0" "$BRCM_CONF"; then
-    pass "brcmfmac module options set: power_save=0 roamoff=1"
+if [ -f "$BRCM_CONF" ] && grep -q "roamoff=1" "$BRCM_CONF"; then
+    pass "brcmfmac module options set: roamoff=1 (power_save handled by NetworkManager)"
 else
     fail "brcmfmac modprobe config missing or incomplete: $BRCM_CONF"
+    info "Fix: run macbook_hardware_fixer.sh step 3"
 fi
 
-WIFI_NVRAM_GENERIC="/lib/firmware/brcm/brcmfmac4350-pcie.txt"
+# NVRAM check — kernel 6.6+ uses brcmfmac4350c2-pcie (chip rev C2).
+# Both the base file AND the c2 symlink must exist for NVRAM to be loaded.
 WIFI_NVRAM_MODEL="/lib/firmware/brcm/brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt"
-if [ -f "$WIFI_NVRAM_MODEL" ]; then
-    pass "WiFi NVRAM (model-specific) installed: $(basename "$WIFI_NVRAM_MODEL")"
-elif [ -f "$WIFI_NVRAM_GENERIC" ]; then
-    pass "WiFi NVRAM (generic) installed: $(basename "$WIFI_NVRAM_GENERIC")"
+WIFI_NVRAM_MODEL_C2="/lib/firmware/brcm/brcmfmac4350c2-pcie.Apple Inc.-MacBookPro14,1.txt"
+WIFI_NVRAM_GENERIC="/lib/firmware/brcm/brcmfmac4350-pcie.txt"
+WIFI_NVRAM_GENERIC_C2="/lib/firmware/brcm/brcmfmac4350c2-pcie.txt"
+
+if [ -f "$WIFI_NVRAM_MODEL" ] || [ -L "$WIFI_NVRAM_MODEL" ]; then
+    pass "WiFi NVRAM Apple (model-specific) present: brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt"
 else
-    warn "WiFi NVRAM not installed — WiFi may have sub-optimal TX power / 5 GHz stability"
-    info "Fix: run macbook_hardware_fixer.sh (step 3 copies macOS NVRAM from firmware/wifi/)"
+    warn "WiFi NVRAM Apple (model-specific) missing"
+    info "Fix: run macbook_hardware_fixer.sh step 3"
+fi
+
+if [ -L "$WIFI_NVRAM_MODEL_C2" ] || [ -f "$WIFI_NVRAM_MODEL_C2" ]; then
+    pass "WiFi NVRAM c2 symlink present — kernel 6.6+ will load Apple NVRAM"
+else
+    fail "WiFi NVRAM c2 symlink MISSING — kernel 6.6+ ignores Apple NVRAM silently"
+    info "Fix: sudo ln -sf 'brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt' /lib/firmware/brcm/brcmfmac4350c2-pcie.Apple\ Inc.-MacBookPro14,1.txt"
+    info "     sudo ln -sf brcmfmac4350-pcie.txt /lib/firmware/brcm/brcmfmac4350c2-pcie.txt"
+fi
+
+NM_BAND="/etc/NetworkManager/conf.d/98-wifi-band-5ghz.conf"
+if [ -f "$NM_BAND" ] && grep -q "wifi.band=a" "$NM_BAND"; then
+    pass "WiFi 5GHz preferred via NetworkManager (band=a, fallback to 2.4GHz if needed)"
+else
+    warn "WiFi 5GHz preference not configured"
+    info "Fix: run macbook_hardware_fixer.sh step 3"
 fi
 
 # =============================================================================
