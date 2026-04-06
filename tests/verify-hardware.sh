@@ -307,12 +307,14 @@ else
     info "     sudo ln -sf brcmfmac4350-pcie.txt /lib/firmware/brcm/brcmfmac4350c2-pcie.txt"
 fi
 
+# wifi.band=a in conf.d is invalid (NM warns and ignores it) — removed in fixer.sh.
+# 5GHz band preference is a per-connection setting, not a global conf.d option.
 NM_BAND="/etc/NetworkManager/conf.d/98-wifi-band-5ghz.conf"
 if [ -f "$NM_BAND" ] && grep -q "wifi.band=a" "$NM_BAND"; then
-    pass "WiFi 5GHz preferred via NetworkManager (band=a, fallback to 2.4GHz if needed)"
+    warn "WiFi: stale invalid conf.d present ($NM_BAND) — NM ignores it and logs a warning"
+    info "Fix: rm $NM_BAND && sudo nmcli general reload conf"
 else
-    warn "WiFi 5GHz preference not configured"
-    info "Fix: run macbook_hardware_fixer.sh step 3"
+    pass "WiFi: no invalid band conf.d (correct — 5GHz set per-connection via nmcli if needed)"
 fi
 
 # =============================================================================
@@ -411,13 +413,15 @@ RAPL_PL1="$RAPL_BASE/constraint_0_power_limit_uw"
 if [ -f "$RAPL_PL1" ]; then
     PL1_UW=$(cat "$RAPL_PL1" 2>/dev/null || echo "0")
     PL1_W=$(( PL1_UW / 1000000 ))
-    if [ "$PL1_W" -le 15 ] && [ "$PL1_W" -gt 0 ]; then
-        pass "RAPL PL1 = ${PL1_W}W ≤ 15W (CPU won't sustain turbo → cooler)"
+    if [ "$PL1_W" -ge 15 ] && [ "$PL1_W" -le 25 ]; then
+        pass "RAPL PL1 = ${PL1_W}W (target 20W — sustains 2.8–3.0 GHz without thermal throttle)"
     elif [ "$PL1_W" -gt 50 ]; then
-        fail "RAPL PL1 = ${PL1_W}W — WAY too high (BIOS default). CPU runs at full turbo indefinitely → overheating"
-        info "Fix: run macbook_hardware_fixer.sh (creates macbook-rapl-limits.service)"
+        fail "RAPL PL1 = ${PL1_W}W — BIOS default. CPU overheats. macbook-rapl-limits.service not applied"
+        info "Fix: systemctl restart macbook-rapl-limits  or reboot"
+    elif [ "$PL1_W" -gt 25 ]; then
+        warn "RAPL PL1 = ${PL1_W}W — above sweet-spot (20W), Mac will run warmer than optimal"
     else
-        warn "RAPL PL1 = ${PL1_W}W — higher than i5-7360U TDP (15W), may run warm"
+        warn "RAPL PL1 = ${PL1_W}W — too low (< 15W), CPU may throttle under load"
     fi
 else
     info "RAPL sysfs not readable without root — re-run with sudo for RAPL check"

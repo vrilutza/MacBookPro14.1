@@ -205,8 +205,11 @@ Works out of the box with the `brcmfmac` kernel driver. The script applies optim
 
   The macOS NVRAM is calibrated for `boardid=0x170` (hawaii platform) and improves WiFi
   range, 5 GHz stability, and regulatory compliance vs the generic Linux NVRAM.
-- Configures **5 GHz band preference** via NetworkManager (`band=a`): less congestion,
-  higher throughput. Automatic fallback to 2.4 GHz if the AP is not reachable on 5 GHz.
+- **5 GHz band preference**: set per-connection (the `wifi.band=a` key is invalid in
+  NetworkManager conf.d files — NM ignores it and logs a warning):
+  ```bash
+  nmcli connection modify "YourWiFiName" 802-11-wireless.band a
+  ```
 
 **Set regulatory domain** (if channels are limited):
 ```bash
