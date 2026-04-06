@@ -97,19 +97,10 @@ enum {
 
 
 /* CS8409 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
-// for the moment leave my old definition names but map to the new module enum values
 #define CS8409_IDX_DEV_CFG     CS8409_PIN_AFG
 #define CS8409_VENDOR_NID      CS8409_PIN_VENDOR_WIDGET
 #define CS8409_BEEP_NID        CS8409_PIN_BEEP_GEN
-#else
-#define CS8409_IDX_DEV_CFG     0x01
-#define CS8409_VENDOR_NID      0x47
-#define CS8409_BEEP_NID        0x46
-#endif
 
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
 
 // nid devs based on Dell fixups
 #define CS8409_CS42L83_HP_PIN_NID                       CS8409_PIN_ASP2_TRANSMITTER_A
@@ -126,22 +117,6 @@ enum {
 #define CS42L83_I2C_ADDR	0x90	// for some reason given as (0x48 << 1)
 #define CS8409_CS42L83_RESET	0x02	// gpio interrupt mask - see cs42l83_external_control_GPIO
 #define CS8409_CS42L83_INT	0x01	// gpio interrupt mask
-
-#else
-
-#define CS8409_CS42L83_HP_PIN_NID                       0x2c
-#define CS8409_CS42L83_HP_MIC_PIN_NID                   0x3c
-#define CS8409_CS42L83_MACBOOK_MIC_PIN_NID              0x44
-#define CS8409_CS42L83_MACBOOK_LINEIN_PIN_NID           0x45
-#define CS8409_CS42L83_IMAC_MIC_PIN_NID                 0x45
-#define CS8409_CS42L83_IMAC_LINEIN_PIN_NID              0x44
-#define CS8409_CS42L83_MACBOOK_LINEIN_ADC_PIN_NID       0x23
-#define CS8409_CS42L83_IMAC_LINEIN_ADC_PIN_NID          0x22
-
-#endif
-
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
 
 // this is a list of i2c commands for init
 static const struct cs8409_i2c_param cs42l83_init_reg_seq[] = {
@@ -173,8 +148,6 @@ const struct hda_pcm_stream cs42l83_apple_pcm_analog_capture = {
         .rates = SNDRV_PCM_RATE_44100, /* fixed rate */
 };
 
-
-#endif
 
 /*
 
@@ -406,165 +379,7 @@ const struct hda_pcm_stream cs42l83_apple_pcm_analog_capture = {
 
 
 
-/*
- */
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0)
-
-struct unsol_item {
-        struct list_head list;
-        unsigned int idx;
-        unsigned int res;
-};
-
-struct hda_cvt_setup_apple {
-        hda_nid_t nid;
-        u8 stream_tag;
-        u8 channel_id;
-        u16 format_id;
-        unsigned char active;   /* cvt is currently used */
-        unsigned char dirty;    /* setups should be cleared */
-};
-
-struct cs8409_apple_spec {
-	struct hda_gen_spec gen;
-
-	unsigned int gpio_mask;
-	unsigned int gpio_dir;
-	unsigned int gpio_data;
-	unsigned int gpio_eapd_hp; /* EAPD GPIO bit for headphones */
-	unsigned int gpio_eapd_speaker; /* EAPD GPIO bit for speakers */
-
-	/* CS421x */
-	unsigned int spdif_detect:1;
-	unsigned int spdif_present:1;
-	unsigned int sense_b:1;
-	hda_nid_t vendor_nid;
-
-        /* digital beep */
-        hda_nid_t beep_nid;
-
-	/* for MBP SPDIF control */
-	int (*spdif_sw_put)(struct snd_kcontrol *kcontrol,
-			    struct snd_ctl_elem_value *ucontrol);
-
-	// so it appears we have "concurrency" in the linux HDA code
-	// in that if unsolicited responses occur which perform extensive verbs
-	// the hda verbs are intermixed with eg extensive start playback verbs
-	// on OSX we appear to have blocks of verbs during which unsolicited responses
-	// are logged but the unsolicited verbs occur after the verb block
-	// this flag is used to flag such verb blocks and the list will store the
-	// responses
-	// we use a pre-allocated list - if we have more than 10 outstanding unsols
-	// we will drop
-	// not clear if mutexes would be the way to go
-	int block_unsol;
-	struct list_head unsol_list;
-	struct unsol_item unsol_items_prealloc[10];
-	int unsol_items_prealloc_used[10];
-
-	// add in specific nids for the intmike and linein as they seem to swap
-	// between macbook pros (14,3) and imacs (18,3)
-	int intmike_nid;
-	int linein_nid;
-	int intmike_adc_nid;
-	int linein_amp_nid;
-
-	// the following flag bits also need swapping
-	int reg9_intmike_dmic_mo;
-	int reg9_linein_dmic_mo;
-	int reg82_intmike_dmic_scl;
-	int reg82_linein_dmic_scl;
-
-
-        // add explicit stream format store entries as per hda_codec using a local definition
-        // of hda_cvt_setup (which is local to hda_codec.c)
-        // also use explicit nid versions
-        // (except that means either need explicit functions for each nid or have to lookup
-        //  nid each time want to use in a generic function with nid argument)
-        struct hda_cvt_setup_apple nid_0x02;
-        struct hda_cvt_setup_apple nid_0x03;
-        struct hda_cvt_setup_apple nid_0x0a;
-        struct hda_cvt_setup_apple nid_0x22;
-        struct hda_cvt_setup_apple nid_0x23;
-        struct hda_cvt_setup_apple nid_0x1a;
-
-
-	// new item to deal with jack presence as Apple seems to have barfed
-	// the HDA spec by using a separate headphone chip
-	int jack_present;
-
-	// save the type of headphone connected
-	int headset_type;
-
-	// if headphone has mike or not
-	int have_mike;
-
-	// if headphone has buttons or not
-	int have_buttons;
-
-        // current stream channel count
-        int stream_channels;
-
-	// set when playing for plug/unplug events while playing
-	int playing;
-
-	// set when capturing for plug/unplug events while capturing
-	int capturing;
-
-	// changing coding - OSX sets up the format on plugin
-	// then does some minimal setup when start play
-	// initial coding delayed any format setup till actually play
-	// this works for no mike but not for mike - we need to initialize
-	// the mike on plugin
-	// this flag will be set when we have done the format setup
-	// so know if need to do it on play or not
-	// now need 2 flags - one for play and one for capture
-	int headset_play_format_setup_needed;
-	int headset_capture_format_setup_needed;
-
-	int headset_presetup_done;
-
-
-	int use_data;
-
-
-	// this is new item for dealing with headset plugins
-	// so can distinguish which phase we are in if have multiple interrupts
-	// now primarily used to indicate if booted with headset plugged in
-	int headset_phase;
-
-	// another dirty hack item to manage the different headset enable codes
-	int headset_enable;
-
-	int play_init;
-	int capture_init;
-
-        int play_init_count;
-        int capture_init_count;
-
-	// new item to limit times we redo unmute/play
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
-	struct timespec64 last_play_time;
-#else
-	struct timespec last_play_time;
-#endif
-	// record the first play time - we have a problem there
-	// some initial plays that I dont understand - so skip any setup
-	// till sometime after the first play
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
-	struct timespec64 first_play_time;
-#else
-	struct timespec first_play_time;
-#endif
-
-};
-#endif
-
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
 #define cs8409_apple_spec cs8409_spec
-#endif
 
 
 // coding copied from hda_generic.c to print the nid path details
@@ -573,7 +388,7 @@ struct cs8409_apple_spec {
 #define debug_badness(fmt, ...)                                         \
         mycodec_dbg(codec, fmt, ##__VA_ARGS__)
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0) && TESTING == 0
+#if TESTING == 0
 
 static void print_nid_path(struct hda_codec *codec,
 			   const char *pfx, struct nid_path *path)
@@ -868,11 +683,7 @@ cs8409_any_jack_tbl_get_from_nid(struct hda_codec *codec, hda_nid_t nid)
 static struct hda_jack_tbl *
 cs_8409_hda_jack_tbl_new(struct hda_codec *codec, hda_nid_t nid, int dev_id)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
         struct hda_jack_tbl *jack = snd_hda_jack_tbl_get_mst(codec, nid, dev_id);
-#else
-        struct hda_jack_tbl *jack = snd_hda_jack_tbl_get(codec, nid);
-#endif
         struct hda_jack_tbl *existing_nid_jack = cs8409_any_jack_tbl_get_from_nid(codec, nid);
 
         WARN_ON(dev_id != 0 && !codec->dp_mst);
@@ -883,9 +694,7 @@ cs_8409_hda_jack_tbl_new(struct hda_codec *codec, hda_nid_t nid, int dev_id)
         if (!jack)
                 return NULL;
         jack->nid = nid;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
         jack->dev_id = dev_id;
-#endif
         jack->jack_dirty = 1;
         if (existing_nid_jack) {
                 jack->tag = existing_nid_jack->tag;
@@ -967,9 +776,7 @@ cs_8409_hda_jack_detect_enable_callback(struct hda_codec *codec, hda_nid_t nid, 
 			return ERR_PTR(-ENOMEM);
 		callback->func = func;
 		callback->nid = jack->nid;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
                 callback->dev_id = jack->dev_id;
-#endif
 		callback->next = jack->callback;
 		jack->callback = callback;
 	}
@@ -1006,11 +813,7 @@ static void cs_8409_apple_call_jack_callback(struct hda_codec *codec, unsigned i
 	}
         if (jack->gated_jack) {
                 struct hda_jack_tbl *gated =
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
                         snd_hda_jack_tbl_get_mst(codec, jack->gated_jack, jack->dev_id);
-#else
-                        snd_hda_jack_tbl_get(codec, jack->gated_jack);
-#endif
                 if (gated) {
                         for (cb = gated->callback; cb; cb = cb->next) {
 				cb->jack = jack;
@@ -1853,17 +1656,7 @@ static int cs_8409_apple_parse_auto_config(struct hda_codec *codec)
 	// note this has no bearing on the auto config - its for handling the unsol events properly
 
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0)
-	// new routine to setup inputs - based on the hda_generic code
-	cs_8409_apple_create_input_ctls_old(codec);
-#else
-	// as of 5.13 the definition of AUTO_CFG_MAX_INS has been increased to handle the 8409
-	// so the above may not be needed
-	// (without the above no input pins were recognised at all)
-	// need to check if fixed other input definitions in cs_8409_apple_create_input_ctls
-	// and redo the updated input definitions here
 	cs_8409_apple_create_input_ctls(codec);
-#endif
 
 
         // so do I keep this or not??
@@ -1885,551 +1678,7 @@ static int cs_8409_apple_parse_auto_config(struct hda_codec *codec)
 	return 0;
 }
 
-// this is only needed if kernel is < 5.13
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0) || TESTING
-
-// pigs - we need a lot of hda_generic local functions
-#include "patch_cirrus_hda_generic_copy.h"
-
-// so we need to hack this code because we have more adcs than AUTO_CFG_MAX_INS
-// adcs (8) - actual number is 18
-// no good way to do this - except to check connection list for each adc and
-// see if connected to nid we are looking at
-// so define new function
-
-static int cs_8409_add_adc_nid(struct hda_codec *codec, hda_nid_t pin)
-{
-	struct hda_gen_spec *spec = codec->spec;
-	hda_nid_t nid;
-	hda_nid_t *adc_nids = spec->adc_nids;
-	int max_nums = ARRAY_SIZE(spec->adc_nids);
-	int nums = 0;
-	int itm = 0;
-
-        myprintk("snd_hda_intel: cs_8409_add_adc_nid pin 0x%x\n",pin);
-
-	for_each_hda_codec_node(nid, codec) {
-		unsigned int caps = get_wcaps(codec, nid);
-		int type = get_wcaps_type(caps);
-		int fndnid = 0;
-
-		if (type != AC_WID_AUD_IN || (caps & AC_WCAP_DIGITAL))
-			continue;
-
-		//myprintk("snd_hda_intel: cs_8409_add_adc_nid nid 0x%x\n",nid);
-
-		{
-		const hda_nid_t *connptr = NULL;
-		int num_conns = snd_hda_get_conn_list(codec, nid, &connptr);
-		int i;
-		fndnid = 0;
-		for (i = 0; i < num_conns; i++) {
-			//myprintk("snd_hda_intel: cs_8409_add_adc_nid %d 0x%x\n",num_conns,connptr[i]);
-			if (connptr[i] == pin) {
-				fndnid = nid;
-			}
-		}
-		}
-		if (fndnid == 0)
-			continue;
-
-		// save only 1st one we match
-		if (spec->num_adc_nids+1 >= max_nums)
-			break;
-		adc_nids[spec->num_adc_nids] = nid;
-		spec->num_adc_nids += 1;
-		break;
-	}
-
-
-	mycodec_dbg(codec, "snd_hda_intel: cs_8409_add_adc_nid num nids %d\n",nums);
-
-	for (itm = 0; itm < spec->num_adc_nids; itm++) {
-		myprintk("snd_hda_intel: cs_8409_add_adc_nid 0x%02x\n", spec->adc_nids[itm]);
-	}
-
-	myprintk("snd_hda_intel: end cs_8409_add_adc_nid\n");
-
-	return nums;
-}
-
-
-
-// copied from parse_capture_source in hda_generic.c
-// we need this although not changed (apart from printks) because local to hda_generic.c
-
-/* parse capture source paths from the given pin and create imux items */
-static int cs_8409_parse_capture_source(struct hda_codec *codec, hda_nid_t pin,
-				int cfg_idx, int num_adcs,
-				const char *label, int anchor)
-{
-	struct hda_gen_spec *spec = codec->spec;
-	struct hda_input_mux *imux = &spec->input_mux;
-	int imux_idx = imux->num_items;
-	bool imux_added = false;
-	int c;
-
-	myprintk("snd_hda_intel: cs_8409_parse_capture_source pin 0x%x\n",pin);
-
-	for (c = 0; c < num_adcs; c++) {
-		struct nid_path *path;
-		hda_nid_t adc = spec->adc_nids[c];
-
-		myprintk("snd_hda_intel: cs_8409_parse_capture_source pin 0x%x adc 0x%x check reachable\n",pin,adc);
-
-		if (!is_reachable_path(codec, pin, adc))
-			continue;
-		myprintk("snd_hda_intel: cs_8409_parse_capture_source pin 0x%x adc 0x%x reachable\n",pin,adc);
-		path = snd_hda_add_new_path(codec, pin, adc, anchor);
-		if (!path)
-			continue;
-		print_nid_path(codec, "input", path);
-		spec->input_paths[imux_idx][c] =
-			snd_hda_get_path_idx(codec, path);
-
-		if (!imux_added) {
-			if (spec->hp_mic_pin == pin)
-				spec->hp_mic_mux_idx = imux->num_items;
-			spec->imux_pins[imux->num_items] = pin;
-			snd_hda_add_imux_item(codec, imux, label, cfg_idx, NULL);
-			imux_added = true;
-			if (spec->dyn_adc_switch)
-				spec->dyn_adc_idx[imux_idx] = c;
-		}
-	}
-
-        myprintk("snd_hda_intel: end cs_8409_parse_capture_source\n");
-
-	return 0;
-}
-
-
-#define CFG_IDX_MIX	99	/* a dummy cfg->input idx for stereo mix */
-
-// copied from create_input_ctls in hda_generic.c
-
-static int cs_8409_apple_create_input_ctls_old(struct hda_codec *codec)
-{
-	struct hda_gen_spec *spec = codec->spec;
-	const struct auto_pin_cfg *cfg = &spec->autocfg;
-	hda_nid_t mixer = spec->mixer_nid;
-	int num_adcs = 0;
-	int i, err;
-	unsigned int val;
-
-        myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old\n");
-
-	// we cannot do this
-	//num_adcs = cs_8409_fill_adc_nids(codec);
-	//if (num_adcs < 0)
-	//	return 0;
-
-	// clear out the auto config setup
-	// hope that all_adcs is not different from adc_nids - doesnt seem to be for auto config only
-	memset(spec->adc_nids, 0, sizeof(spec->adc_nids));
-	memset(spec->all_adcs, 0, sizeof(spec->all_adcs));
-	spec->num_adc_nids = 0;
-
-	for (i = 0; i < cfg->num_inputs; i++) {
-		hda_nid_t pin;
-		int fndadc = 0;
-
-		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old - input %d\n",i);
-
-		pin = cfg->inputs[i].pin;
-		if (!is_input_pin(codec, pin))
-			continue;
-
-		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old - input %d pin 0x%x\n",i,pin);
-
-		// now scan all nodes for adc nodes and find one connected to this pin
-		fndadc = cs_8409_add_adc_nid(codec, pin);
-		if (!fndadc)
-			continue;
-	}
-
-	num_adcs = spec->num_adc_nids;
-
-	/* copy the detected ADCs to all_adcs[] */
-	spec->num_all_adcs = spec->num_adc_nids;
-	memcpy(spec->all_adcs, spec->adc_nids,  spec->num_adc_nids* sizeof(hda_nid_t));
-
-	err = fill_input_pin_labels(codec);
-	if (err < 0)
-		return err;
-
-	for (i = 0; i < cfg->num_inputs; i++) {
-		hda_nid_t pin;
-		int fndadc = 0;
-
-		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old - input %d\n",i);
-
-		pin = cfg->inputs[i].pin;
-		if (!is_input_pin(codec, pin))
-			continue;
-
-		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old - input %d pin 0x%x\n",i,pin);
-
-		//// now scan the adc nodes and find one connected to this pin
-		//fndadc = cs_8409_add_adc_nid(codec, pin);
-		//if (!fndadc)
-		//	continue;
-
-		val = PIN_IN;
-		if (cfg->inputs[i].type == AUTO_PIN_MIC)
-			val |= snd_hda_get_default_vref(codec, pin);
-
-		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old - input %d pin 0x%x val 0x%x\n",i,pin,val);
-
-		if (pin != spec->hp_mic_pin &&
-		    !snd_hda_codec_get_pin_target(codec, pin))
-			set_pin_target(codec, pin, val, false);
-
-		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old - input %d pin 0x%x val 0x%x mixer 0x%x\n",i,pin,val,mixer);
-
-		if (mixer) {
-			if (is_reachable_path(codec, pin, mixer)) {
-				err = new_analog_input(codec, i, pin,
-						       spec->input_labels[i],
-						       spec->input_label_idxs[i],
-						       mixer);
-				if (err < 0)
-					return err;
-			}
-		}
-
-		// so connections are from the adc nid to the input pin nid
-		//{
-		//const hda_nid_t conn[256];
-		//const hda_nid_t *connptr = conn;
-		//int num_conns = snd_hda_get_conn_list(codec, pin, &connptr);
-		//int i;
-		//myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old pin 0x%x num conn %d\n",pin,num_conns);
-		//for (i = 0; i < num_conns; i++) {
-		//	myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls_old pin 0x%x conn 0x%x\n",pin,conn[i]);
-		//}
-		//}
-
-
-		// this is the problem routine - this loops over the adcs to do anything
-		// so if num_adcs is 0 or none of the adc entries are used this does nothing
-
-		err = cs_8409_parse_capture_source(codec, pin, i, num_adcs,
-					   spec->input_labels[i], -mixer);
-		if (err < 0)
-			return err;
-
-		// comment for the moment as needs lots of other functions
-		//if (spec->add_jack_modes) {
-		//	err = create_in_jack_mode(codec, pin);
-		//	if (err < 0)
-		//		return err;
-		//}
-	}
-
-	/* add stereo mix when explicitly enabled via hint */
-	if (mixer && spec->add_stereo_mix_input == HDA_HINT_STEREO_MIX_ENABLE) {
-		err = cs_8409_parse_capture_source(codec, mixer, CFG_IDX_MIX, num_adcs,
-					   "Stereo Mix", 0);
-		if (err < 0)
-			return err;
-		else
-			spec->suppress_auto_mic = 1;
-	}
-
-        myprintk("snd_hda_intel: end cs_8409_apple_create_input_ctls_old\n");
-
-	return 0;
-}
-
-#endif
-
-/* we still need some fixups with the new version
-   as it doesnt seem to setup the inputs correctly
- */
-
-// the culprit function seems to be check_dyn_adc_switch in hda_generic.c
-// - it should reduce the adc_nids list down to the 2 connected input adcs - but it does not
-// - its current implementation appears to have a fundamental flaw
-// - it assumes adcs are in a non-null list that ends in null
-// but the 8409 has a random non-null element in an essentially null list
-
-
-static int cs_8409_apple_create_input_ctls(struct hda_codec *codec)
-{
-	struct hda_gen_spec *spec = codec->spec;
-	const struct auto_pin_cfg *cfg = &spec->autocfg;
-	hda_nid_t mixer = spec->mixer_nid;
-	struct hda_input_mux *imux = &spec->input_mux;
-	int num_adcs = 0;
-	int err;
-	unsigned int val;
-	int i, n, nums;
-
-	myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls\n");
-
-	// determine for which input items we have a non-zero adc
-	nums = 0;
-	for (i = 0; i < imux->num_items; i++) {
-		for (n = 0; n < spec->num_adc_nids; n++) {
-			if (spec->input_paths[i][n]) nums++;
-		}
-	}
-
-	// this code essentially taken from check_dyn_adc_switch
-	// reduce the adc_nids list to connected items
-	if (nums != spec->num_adc_nids) {
-		/* shrink the invalid adcs and input paths */
-		printk("snd_hda_intel: hda_generic_check_dyn_adc_switch shrinking\n");
-		nums = 0;
-		for (i = 0; i < imux->num_items; i++) {
-			for (n = 0; n < spec->num_adc_nids; n++) {
-				if (spec->input_paths[i][n]) {
-					struct nid_path *path = NULL;
-					spec->adc_nids[nums] = spec->adc_nids[n];
-					//invalidate_nid_path(codec, spec->input_paths[i][nums]);
-					// this is explicit coding of simple function invalidate_nid_path from hda_generic.c
-					path = snd_hda_get_path_from_idx(codec, spec->input_paths[i][nums]);
-					if (path)
-						memset(path, 0, sizeof(*path));
-					spec->input_paths[i][nums] = spec->input_paths[i][n];
-					spec->input_paths[i][n] = 0;
-					nums++;
-					// only store first non-zero path per adc
-					break;
-				}
-			}
-		}
-		spec->num_adc_nids = nums;
-	}
-
-	for (n=0; n < spec->num_adc_nids; n++) {
-		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls adc nid 0x%02x\n", spec->adc_nids[n]);
-	}
-
-	myprintk("snd_hda_intel: end cs_8409_apple_create_input_ctls\n");
-
-	return 0;
-}
-
-/* do I need this for 8409 - I certainly need some gpio patching */
-static void cs_8409_apple_fixup_gpio(struct hda_codec *codec,
-                                     const struct hda_fixup *fix, int action)
-{
-       myprintk("snd_hda_intel: cs_8409_apple_fixup_gpio\n");
-
-       // allowable states
-       // HDA_FIXUP_ACT_PRE_PROBE,
-       // HDA_FIXUP_ACT_PROBE,
-       // HDA_FIXUP_ACT_INIT,
-       // HDA_FIXUP_ACT_BUILD,
-       // HDA_FIXUP_ACT_FREE,
-
-       // so inspection suggests no eapd usage on macs - no 0xf0c or 0x70c commands sent
-
-       if (action == HDA_FIXUP_ACT_PRE_PROBE) {
-               //struct cs8409_apple_spec *spec = codec->spec;
-
-               myprintk("snd_hda_intel: cs_8409_apple_fixup_gpio pre probe\n");
-
-               //myprintk("fixup gpio hp=0x%x speaker=0x%x\n", hp_out_mask, speaker_out_mask);
-               //spec->gpio_eapd_hp = hp_out_mask;
-               //spec->gpio_eapd_speaker = speaker_out_mask;
-               //spec->gpio_mask = 0xff;
-               //spec->gpio_data =
-               //  spec->gpio_dir =
-               //  spec->gpio_eapd_hp | spec->gpio_eapd_speaker;
-       }
-       else if (action == HDA_FIXUP_ACT_PROBE) {
-               myprintk("snd_hda_intel: cs_8409_apple_fixup_gpio probe\n");
-       }
-       else if (action == HDA_FIXUP_ACT_INIT) {
-               myprintk("snd_hda_intel: cs_8409_apple_fixup_gpio init\n");
-       }
-       else if (action == HDA_FIXUP_ACT_BUILD) {
-               myprintk("snd_hda_intel: cs_8409_apple_fixup_gpio build\n");
-       }
-       else if (action == HDA_FIXUP_ACT_FREE) {
-               myprintk("snd_hda_intel: cs_8409_apple_fixup_gpio free\n");
-       }
-       myprintk("snd_hda_intel: end cs_8409_apple_fixup_gpio\n");
-}
-
-
-// this is from a previous 8409 fixup - remove when see what need to be replaced by
-
-#ifdef APPLE_FIXUPS
-
-/* CS8409 */
-enum {
-       CS8409_MBP131,
-       CS8409_APPLE_GPIO_0,
-       CS8409_MBP143,
-       CS8409_APPLE_GPIO,
-};
-
-static const struct hda_model_fixup cs8409_apple_models[] = {
-       { .id = CS8409_MBP131, .name = "mbp131" },
-       { .id = CS8409_MBP143, .name = "mbp143" },
-       {}
-};
-
-
-static const struct snd_pci_quirk cs8409_apple_fixup_tbl[] = {
-       SND_PCI_QUIRK(0x106b, 0x3300, "MacBookPro 13,1", CS8409_MBP131),
-       //SND_PCI_QUIRK(0x106b, 0x3600, "MacBookPro 14,2", CS8409_MBP143),
-       SND_PCI_QUIRK(0x106b, 0x3900, "MacBookPro 14,3", CS8409_MBP143),
-       //SND_PCI_QUIRK(0x106b, 0x0f00, "Imac 18,2", CS8409_MBP143),
-       //SND_PCI_QUIRK(0x106b, 0x1000, "Imac 18,3", CS8409_MBP143),
-       //SND_PCI_QUIRK(0x106b, 0x1000, "Imac 19,1", CS8409_MBP143),
-       {} /* terminator */
-};
-
-static const struct hda_pintbl mbp131_pincfgs[] = {
-       {} /* terminator */
-};
-
-static const struct hda_pintbl mbp143_pincfgs[] = {
-       {} /* terminator */
-};
-
-static const struct hda_fixup cs8409_apple_fixups[] = {
-       [CS8409_MBP131] = {
-               .type = HDA_FIXUP_PINS,
-               .v.pins = mbp131_pincfgs,
-               .chained = true,
-               .chain_id = CS8409_APPLE_GPIO_0,
-       },
-       [CS8409_APPLE_GPIO_0] = {
-               .type = HDA_FIXUP_FUNC,
-               .v.func = cs_8409_apple_fixup_gpio,
-       },
-       [CS8409_MBP143] = {
-               .type = HDA_FIXUP_PINS,
-               .v.pins = mbp143_pincfgs,
-               .chained = true,
-               .chain_id = CS8409_APPLE_GPIO,
-       },
-       [CS8409_APPLE_GPIO] = {
-               .type = HDA_FIXUP_FUNC,
-               .v.func = cs_8409_apple_fixup_gpio,
-       },
-};
-#endif
-
-
-// as per Apple we need to fix the pin config for the linein nid (it defaults as no conn, Line Out which messes the auto config)
-// (assuming this swaps as nid swaps for macbook pro/imac)
-// except define device as line in not mic in as per Apple, remove the 0x00000100 which is apparently AC_DEFCFG_MISC_NO_PRESENCE
-// plus make it a jack like the other jack inputs (so 0x00800001 not 0x90a00101 as per Apple)
-
-static const struct hda_pintbl macbook_pro_pincfgs[] = {
-        { 0x45, 0x00800101 },
-        { }
-};
-static const struct hda_pintbl imac_pincfgs[] = {
-        { 0x44, 0x00800101 },
-        { }
-};
-
-
-static void cs_8409_cs42l83_unsolicited_response(struct hda_codec *codec, unsigned int res);
-
-static void cs_8409_cs42l83_callback(struct hda_codec *codec, struct hda_jack_callback *event)
-{
-        struct cs8409_apple_spec *spec = codec->spec;
-
-        mycodec_info(codec, "cs_8409_cs42l83_callback %pF\n", cs_8409_cs42l83_callback);
-
-	// for kernel version 4 we stored the unsol res data in private_data
-	// - now its a separate entity
-        ////cs_8409_cs42l83_unsol_event_handler(codec, event->private_data);
-
-        cs_8409_cs42l83_unsol_event_handler(codec, event->unsol_res);
-
-        mycodec_info(codec, "cs_8409_cs42l83_callback end\n");
-}
-
-
-static void cs_8409_cs42l83_unsol_event_handler(struct hda_codec *codec, unsigned int unsol_res)
-{
-	struct cs8409_apple_spec *spec = codec->spec;
-
-	mycodec_info(codec, "cs_8409_cs42l83_unsol_event_handler\n");
-
-
-	// print the stored unsol res which seems to be the GPIO pins state
-	mycodec_info(codec, "cs_8409_cs42l83_unsol_event_handler - event unsol_res 0x%08x\n",unsol_res);
-
-	cs_8409_cs42l83_unsolicited_response(codec, unsol_res);
-
-
-	// now think timers not the way to go
-	// patch_realtek.c has to deal with similar issues of plugin, headset detection
-	// and just uses msleep calls
-	//mod_timer(&cs_8409_hp_timer, jiffies + msecs_to_jiffies(250));
-
-        // the delayed_work feature might be a way to go tho
-
-        mycodec_info(codec, "cs_8409_cs42l83_unsol_event_handler end\n");
-}
-
-
-// we have 4 automute hooks
-// void (*automute_hook)(struct hda_codec *codec);
-// void (*hp_automute_hook)(struct hda_codec *codec, struct hda_jack_callback *cb);
-// void (*line_automute_hook)(struct hda_codec *codec, struct hda_jack_callback *cb);
-// void (*mic_autoswitch_hook)(struct hda_codec *codec, struct hda_jack_callback *cb);
-
-static void cs_8409_automute(struct hda_codec *codec)
-{
-	struct cs8409_apple_spec *spec = codec->spec;
-	dev_info(hda_codec_dev(codec), "cs_8409_automute called\n");
-}
-
-static int cs_8409_boot_setup(struct hda_codec *codec);
-
-
-static void cs_8409_playback_pcm_hook(struct hda_pcm_stream *hinfo,
-                                      struct hda_codec *codec,
-                                      struct snd_pcm_substream *substream,
-                                      int action);
-
-static void cs_8409_capture_pcm_hook(struct hda_pcm_stream *hinfo,
-                                     struct hda_codec *codec,
-                                     struct snd_pcm_substream *substream,
-                                     int action);
-
-// new attempt if we decide to use the existing fixup mechanism to handle setup
-
-#ifdef APPLE_FIXUPS
-static int cs8409_apple_nouse(struct hda_codec *codec)
-{
-	struct cs8409_apple_spec *spec = codec->spec;
-	//struct cs8409_spec *spec = codec->spec;
-        int err;
-        int itm;
-
-        snd_hda_pick_fixup(codec, cs8409_apple_models, cs8409_apple_fixup_tbl, cs8409_apple_fixups);
-
-        mycodec_dbg(codec, "Picked ID=%d, VID=%08x, DEV=%08x\n", codec->fixup_id,
-                         codec->bus->pci->subsystem_vendor,
-                         codec->bus->pci->subsystem_device);
-
-        snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PRE_PROBE);
-
-        err = cs8409_apple_parse_auto_config(codec);
-        if (err < 0) {
-                cs8409_remove(codec);
-                return err;
-        }
-
-        snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PROBE);
-        return 0;
-}
-#endif
-
-
+// BLOCK REMOVED: old kernel < 5.13 input control functions (no longer needed for kernel 7+)
 // for Apple we need multiple versions because so far macbook pro and imacs use different nids
 static int cs8409_cs42l83_macbook_exec_verb(struct hdac_device *dev, unsigned int cmd, unsigned int flags,
                                             unsigned int *res)
@@ -2437,9 +1686,7 @@ static int cs8409_cs42l83_macbook_exec_verb(struct hdac_device *dev, unsigned in
         struct hda_codec *codec = container_of(dev, struct hda_codec, core);
         struct cs8409_apple_spec *spec = codec->spec;
         //struct cs8409_spec *spec = codec->spec;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
         struct sub_codec *cs42l83 = spec->scodecs[CS8409_CODEC0];
-#endif
 
         unsigned int nid = ((cmd >> 20) & 0x07f);
         unsigned int verb = ((cmd >> 8) & 0x0fff);
@@ -2482,9 +1729,7 @@ static int cs8409_cs42l83_imac_exec_verb(struct hdac_device *dev, unsigned int c
         struct hda_codec *codec = container_of(dev, struct hda_codec, core);
         struct cs8409_apple_spec *spec = codec->spec;
         //struct cs8409_spec *spec = codec->spec;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
         struct sub_codec *cs42l83 = spec->scodecs[CS8409_CODEC0];
-#endif
 
         unsigned int nid = ((cmd >> 20) & 0x07f);
         unsigned int verb = ((cmd >> 8) & 0x0fff);
@@ -2528,9 +1773,7 @@ static int cs8409_cs42l83_exec_verb(struct hdac_device *dev, unsigned int cmd, u
         struct hda_codec *codec = container_of(dev, struct hda_codec, core);
         struct cs8409_apple_spec *spec = codec->spec;
         //struct cs8409_spec *spec = codec->spec;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
         struct sub_codec *cs42l83 = spec->scodecs[CS8409_CODEC0];
-#endif
 
         unsigned int nid = ((cmd >> 20) & 0x07f);
         unsigned int verb = ((cmd >> 8) & 0x0fff);
@@ -2584,9 +1827,7 @@ static struct cs8409_apple_spec *cs8409_apple_alloc_spec(struct hda_codec *codec
 	if (!spec)
 		return NULL;
 	codec->spec = spec;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
 	spec->codec = codec;
-#endif
 	//spec->vendor_nid = vendor_nid;
 
 	// this allows power control per nid - for Apple ignoring all power control for now
@@ -2684,8 +1925,6 @@ static int cs8409_apple(struct hda_codec *codec)
 	//snd_hda_add_verbs(codec, cs8409_cs42l83_init_verbh);
 
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0)
-
         // now going with the Dell way of handling PIN_SENSE for jack plug/unplug events so need this
 
         myprintk("snd_hda_intel: exec verb setup START\n");
@@ -2708,11 +1947,7 @@ static int cs8409_apple(struct hda_codec *codec)
 	spec->scodecs[CS8409_CODEC0]->codec = codec;
 
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-
         driver = hda_codec_to_driver(codec);
-
-	//codec->ops = cs8409_cs42l83_ops;
 
         if (explicit)
                {
@@ -2720,19 +1955,6 @@ static int cs8409_apple(struct hda_codec *codec)
                }
         else
                driver->ops = &cs_8409_apple_ops;
-
-#else
-
-	//codec->patch_ops = cs8409_cs42l83_ops;
-
-        if (explicit)
-               {
-               //codec->patch_ops = cs_8409_apple_ops_explicit;
-               }
-        else
-               codec->patch_ops = cs_8409_apple_ops;
-
-#endif
 
 	// not sure about these
         // the suppress_vmaster is likely reasonable as the Apple way has no dynamic volume controls on either the 8409 chip
@@ -2866,34 +2088,6 @@ static int cs8409_apple(struct hda_codec *codec)
 
 	// tip sense setups done here
 
-
-#else
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
-
-        driver = hda_codec_to_driver(codec);
-
-        if (explicit)
-               {
-               //driver->ops = &cs_8409_apple_ops_explicit;
-               }
-        else
-               driver->ops = &cs_8409_apple_ops;
-
-#else
-
-	//codec->patch_ops = cs8409_cs42l83_ops;
-
-        if (explicit)
-               {
-               //codec->patch_ops = cs_8409_apple_ops_explicit;
-               }
-        else
-               codec->patch_ops = cs_8409_apple_ops;
-
-#endif
-
-#endif
 
         // moved to post auto config
 
@@ -3157,17 +2351,9 @@ static int cs8409_apple(struct hda_codec *codec)
        spec->capture_init_count = 0;
 
        // init the last play time
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
        ktime_get_real_ts64(&(spec->last_play_time));
-#else
-       getnstimeofday(&(spec->last_play_time));
-#endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
        ktime_get_real_ts64(&(spec->first_play_time));
-#else
-       getnstimeofday(&(spec->first_play_time));
-#endif
 
        myprintk("snd_hda_intel: Post Patching for CS8409 Apple\n");
        //mycodec_info(codec, "Post Patching for CS8409 Apple\n");

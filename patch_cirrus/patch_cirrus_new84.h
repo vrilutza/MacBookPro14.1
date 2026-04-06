@@ -1535,13 +1535,8 @@ static void cs_8409_pcm_playback_pre_prepare_hook(struct hda_pcm_stream *hinfo, 
 	struct cs8409_apple_spec *spec = codec->spec;
 
 	if (action == HDA_GEN_PCM_ACT_PREPARE) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 		struct timespec64 curtim;
 		ktime_get_real_ts64(&curtim);
-#else
-		struct timespec curtim;
-		getnstimeofday(&curtim);
-#endif
 		spec->play_init_count++;
 		myprintk("snd_hda_intel: command cs_8409_pcm_playback_pre_prepare_hook HOOK PREPARE init %d %d last %lld cur %lld",spec->play_init,spec->play_init_count,spec->last_play_time.tv_sec,curtim.tv_sec);
                 //dump_stack();
@@ -1686,13 +1681,8 @@ static void cs_8409_playback_pcm_hook(struct hda_pcm_stream *hinfo, struct hda_c
 		// not clear what if any the differences are for those multiple calls
 		// - does mean we need to ensure we only do most operations once
 		// (most of the work is done in the pre prepare function)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0)
 		struct timespec64 curtim;
 		ktime_get_real_ts64(&curtim);
-#else
-		struct timespec curtim;
-		getnstimeofday(&curtim);
-#endif
 		myprintk("snd_hda_intel: command cs_8409_playback_pcm_hook HOOK PREPARE init %d %d last %lld cur %lld",spec->play_init,spec->play_init_count,spec->last_play_time.tv_sec,curtim.tv_sec);
                 //dump_stack();
 		//int power_chk = 0;
