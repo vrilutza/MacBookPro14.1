@@ -60,8 +60,12 @@ On a brand new Ubuntu 26.04 installation on a MacBook Pro 13" 2017, run in order
 **Step 1 — Install build dependencies:**
 ```bash
 sudo apt-get update && sudo apt-get install -y \
-    build-essential linux-headers-$(uname -r) make patch wget git
+    build-essential linux-headers-$(uname -r) make patch wget git dwarves
 ```
+
+> `dwarves` provides `pahole`, required for BTF generation when building the kernel module.
+> Without it the build still succeeds but emits a "pahole version differs" warning.
+> `macbook_hardware_fixer.sh` installs it automatically if missing.
 
 **Step 2 — Clone this repository:**
 ```bash
@@ -269,8 +273,13 @@ The script fixes this with two mechanisms:
 
 | Fix | What it does |
 |---|---|
-| `macbook-rapl-limits.service` | Sets PL1=20W, PL2=40W on every boot |
+| `macbook-rapl-limits.service` | Sets PL1=20W, PL2=40W on every boot, runs **after** `thermald` |
 | `/etc/tlp.d/50-macbook-pro14-1.conf` | Disables turbo on battery, sets HWP to `balance_power` on battery / `performance` on AC |
+
+> **Note — thermald interaction:** `thermald` dynamically adjusts RAPL limits via DPTF.
+> The service is ordered `After=thermald.service` so it always applies last and its
+> values are not overridden at boot. If you later run `systemctl restart thermald`,
+> re-run `systemctl restart macbook-rapl-limits` to restore the correct limits.
 
 **Why PL1=20W and not the stock 15W or cTDP-up 28W:**
 - 15W: leaves performance on the table — CPU throttles to 2.3 GHz under load

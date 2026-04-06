@@ -631,7 +631,11 @@ cat > /etc/systemd/system/macbook-rapl-limits.service << 'EOF'
 [Unit]
 Description=MacBook Pro i5-7360U RAPL power limits — PL1=20W PL2=40W
 Documentation=https://github.com/Dunedan/mbp-2016-linux
-After=basic.target
+# Must run AFTER thermald: thermald dynamically manages RAPL via DPTF and will
+# raise PL1 back to BIOS default (100W) if it starts after this service.
+# Running last (multi-user.target) guarantees our limits are the final values.
+After=network.target thermald.service tlp.service
+Wants=thermald.service
 
 [Service]
 Type=oneshot
@@ -647,7 +651,7 @@ ExecStart=/bin/bash -c '\
     [ -w "$R/constraint_1_time_window_us" ]   && echo 27343000  > "$R/constraint_1_time_window_us"'
 
 [Install]
-WantedBy=basic.target
+WantedBy=multi-user.target
 EOF
 systemctl enable --now macbook-rapl-limits 2>/dev/null || true
 
@@ -1532,7 +1536,7 @@ fi
 echo -e "  ${GREEN}[✔]${NC}  3. WiFi — macOS NVRAM (BCM4350/c2) + power save off + 5GHz preferred"
 echo -e "  ${GREEN}[✔]${NC}  4. FaceTime HD Camera — driver attempted (see warnings above)"
 echo -e "  ${GREEN}[✔]${NC}  5. Thunderbolt 3 — bolt daemon"
-echo -e "  ${GREEN}[✔]${NC}  6. Battery & Thermal — TLP + thermald + RAPL PL1=15W/PL2=25W (time windows set)"
+echo -e "  ${GREEN}[✔]${NC}  6. Battery & Thermal — TLP + thermald + RAPL PL1=20W/PL2=40W (time windows set)"
 echo -e "  ${GREEN}[✔]${NC}  7. applesmc — mbpfan (4500 RPM min, 30°C trigger, max at 48°C), sensors, keyboard backlight (max)"
 echo -e "  ${GREEN}[✔]${NC}  8. Touchpad — tap-to-click, natural scroll, PalmDetection, clickfinger"
 echo -e "  ${GREEN}[✔]${NC}  9. Screen brightness + s2idle suspend + auto-boot EFI disabled"

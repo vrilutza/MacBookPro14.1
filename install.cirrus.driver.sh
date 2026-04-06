@@ -211,6 +211,9 @@ popd > /dev/null
 [[ ! $dkms_action == 'install' ]] && [[ ! -d $update_dir ]] && mkdir $update_dir
 
 if [[ ! $dkms = true ]]; then
+    # dwarves provides pahole, required for BTF generation during kernel module build.
+    # Without it the build emits "pahole version differs from the one used to build the kernel".
+    apt-get install -y --no-install-recommends dwarves 2>/dev/null || true
     make KERNELRELEASE=$UNAME
     make install KERNELRELEASE=$UNAME
     echo -e "\ncontents of $update_dir/codecs/cirrus"
