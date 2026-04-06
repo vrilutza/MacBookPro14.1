@@ -1435,6 +1435,11 @@ location-provider=manual
 ; Default: Bucharest, Romania (lat=44.4, lon=26.1)
 lat=44.4
 lon=26.1
+
+[drm]
+; MacBookPro14,1: Intel GPU enumerates as card1 (not card0).
+; Without this, redshift fails with "Failed to open DRM device: /dev/dri/card0".
+card=1
 EOF
     log_ok "redshift config: 6500K day, 4000K night (matches macOS Night Shift defaults)."
     log_info "Edit /etc/xdg/redshift.conf to change your latitude/longitude."

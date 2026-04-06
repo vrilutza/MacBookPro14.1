@@ -881,6 +881,13 @@ if [ -f "$REDSHIFT_CONF" ]; then
     else
         warn "redshift temps not set to 6500K/4000K — check $REDSHIFT_CONF"
     fi
+    if grep -q "^card=1" "$REDSHIFT_CONF"; then
+        pass "redshift DRM card override: card=1 (Intel GPU on MacBookPro14,1 is card1)"
+    else
+        fail "redshift DRM card not set to card=1 — will fail with 'Failed to open DRM device: /dev/dri/card0'"
+        info "Fix: add [drm]\ncard=1 to $REDSHIFT_CONF and ~/.config/redshift.conf"
+        info "     sudo cp /tmp/redshift.conf.new /etc/xdg/redshift.conf   (if /tmp file exists)"
+    fi
 else
     warn "redshift system config not found: $REDSHIFT_CONF"
     info "Fix: run macbook_hardware_fixer.sh (step 12 writes /etc/xdg/redshift.conf)"
