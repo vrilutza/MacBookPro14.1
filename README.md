@@ -19,7 +19,7 @@ Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery ·
 | FaceTime HD Camera | Broadcom 720p PCIe 14e4:1570 | ⚠️ Needs driver | `macbook_hardware_fixer.sh` step 4 |
 | Thunderbolt 3 | Intel Alpine Ridge 4C (JHL6540) | ✅ Works | `macbook_hardware_fixer.sh` step 5 |
 | Battery & Thermal | Intel i5-7360U + applesmc | ✅ Works | `macbook_hardware_fixer.sh` step 6 |
-| Fan control | applesmc + mbpfan | ✅ Works (aggressive profile: 3500 RPM min, 38°C trigger) | `macbook_hardware_fixer.sh` step 7 |
+| Fan control | applesmc + mbpfan | ✅ Works (max cooling profile: 4500 RPM min, 30°C trigger) | `macbook_hardware_fixer.sh` step 7 |
 | Keyboard backlight | Apple SPI LED | ✅ Works | `macbook_hardware_fixer.sh` step 7 |
 | Touchpad | Apple SPI Touchpad | ✅ Works | `macbook_hardware_fixer.sh` step 8 |
 | Apple SPI Keyboard | Apple SPI Keyboard | ✅ Works | `macbook_hardware_fixer.sh` step 8 |
@@ -65,7 +65,7 @@ sudo apt-get update && sudo apt-get install -y \
 
 **Step 2 — Clone this repository:**
 ```bash
-git clone https://github.com/vrila1985/snd_hda_macbookpro.git
+git clone https://github.com/vrilutza/snd_hda_macbookpro.git
 cd snd_hda_macbookpro
 ```
 
@@ -191,13 +191,18 @@ Works out of the box with the `brcmfmac` kernel driver. The script applies optim
 
 - Disables WiFi power save (causes latency spikes) via NetworkManager:
   `/etc/NetworkManager/conf.d/99-wifi-powersave-off.conf`
-- Sets `power_save=0 roamoff=1` via `/etc/modprobe.d/brcmfmac-macbook.conf`
+- Sets `roamoff=1` via `/etc/modprobe.d/brcmfmac-macbook.conf` (power_save removed in kernel 6.x)
 - Installs macOS NVRAM (board-specific RF calibration) from `firmware/wifi/`:
   - `brcmfmac4350-pcie.Apple Inc.-MacBookPro14,1.txt` (model-specific, kernel prefers this)
   - `brcmfmac4350-pcie.txt` (generic fallback)
-  
+  - Symlinks for kernel 6.6+ which reports the chip as `brcmfmac4350c2-pcie` (BCM4350 rev C2):
+    `brcmfmac4350c2-pcie.Apple Inc.-MacBookPro14,1.txt` → model-specific NVRAM
+    `brcmfmac4350c2-pcie.txt` → generic fallback
+
   The macOS NVRAM is calibrated for `boardid=0x170` (hawaii platform) and improves WiFi
   range, 5 GHz stability, and regulatory compliance vs the generic Linux NVRAM.
+- Configures **5 GHz band preference** via NetworkManager (`band=a`): less congestion,
+  higher throughput. Automatic fallback to 2.4 GHz if the AP is not reachable on 5 GHz.
 
 **Set regulatory domain** (if channels are limited):
 ```bash
@@ -264,15 +269,20 @@ The script fixes this with two mechanisms:
 
 | Fix | What it does |
 |---|---|
-| `macbook-rapl-limits.service` | Sets PL1=15W, PL2=25W on every boot |
-| `/etc/tlp.d/50-macbook-pro14-1.conf` | Disables turbo on battery, sets HWP to `balance_power` |
+| `macbook-rapl-limits.service` | Sets PL1=20W, PL2=40W on every boot |
+| `/etc/tlp.d/50-macbook-pro14-1.conf` | Disables turbo on battery, sets HWP to `balance_power` on battery / `performance` on AC |
 
-Expected result after reboot: **15–25°C lower** at idle and under moderate load.
+**Why PL1=20W and not the stock 15W or cTDP-up 28W:**
+- 15W: leaves performance on the table — CPU throttles to 2.3 GHz under load
+- 28W: exceeds heatsink capacity (thermal resistance ~2.0°C/W at max fan → 81°C sustained → thermal throttle)
+- **20W sweet-spot**: sustains 2.8–3.0 GHz continuously at ~65°C with aggressive fan — no throttle, no overheating
+
+Expected result after reboot: **10–20°C lower** at sustained load vs BIOS defaults (100W).
 
 ```bash
 # Check current RAPL limits:
-cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw   # should be 15000000 (15W)
-cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw   # should be 25000000 (25W)
+cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw   # should be 20000000 (20W)
+cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw   # should be 40000000 (40W)
 
 # Check RAPL time windows (Intel Kaby Lake U spec):
 cat /sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_time_window_us   # should be 976563  (~1s)
@@ -296,7 +306,9 @@ sudo powertop
 | Setting | AC | Battery |
 |---|---|---|
 | CPU governor | powersave | powersave |
-| HWP policy | balance_performance | balance_power |
+| HWP policy | **performance** | balance_power |
+| HWP dynamic boost | **ON** | OFF |
+| Platform profile | **performance** | low-power |
 | Turbo boost | ON | **OFF** (−10–15°C) |
 | PCIe ASPM | default | powersupersave |
 | Runtime PM | on | auto |
@@ -329,14 +341,15 @@ i5-7360U. The profile (tested on Ubuntu 26.04) keeps the Mac cooler than the def
 
 | Setting | Value | Reason |
 |---------|-------|--------|
-| `min_fan1_speed` | 3500 RPM | Never completely silent — prevents heat build-up |
-| `low_temp` | 38°C | Fan starts ramping early |
-| `high_temp` | 50°C | Ramps up quickly |
-| `max_temp` | 55°C | Full speed above this |
+| `min_fan1_speed` | **4500 RPM** | Always spinning fast — maximum baseline cooling |
+| `low_temp` | **30°C** | Fan ramps at even minor load — catches any workload early |
+| `high_temp` | **40°C** | Ramps up quickly |
+| `max_temp` | **48°C** | Full speed above this — CPU rarely exceeds 70°C |
 | `polling_interval` | 1 s | Fast response to temperature spikes |
 
-Config at `/etc/mbpfan.conf`. Combined with the RAPL 15W limit (step 6), this keeps
-the Mac at macOS-like temperatures under load.
+Config at `/etc/mbpfan.conf`. Combined with the RAPL 20W limit (step 6), this keeps
+the Mac at ~65°C sustained under full load. Fan noise is constant (~4500–6000 RPM) —
+by design: cooling priority over silence.
 
 **Live monitor** (run manually in any terminal):
 ```bash
@@ -637,27 +650,42 @@ temperatures:
 | Day | 6500 K | D65 (neutral white — matches macOS Day setting) |
 | Night | 4000 K | Warm/amber (matches macOS Night Shift "warm" preset) |
 
-**Config:** `/etc/xdg/redshift.conf` — edit `lat` / `lon` for your location:
+**Config:** `/etc/xdg/redshift.conf` and `~/.config/redshift.conf` — edit `lat` / `lon` for your location:
 ```ini
 [redshift]
 temp-day=6500
 temp-night=4000
 fade=1
 gamma=1.0
+adjustment-method=drm
 location-provider=manual
 
 [manual]
 lat=44.4      ; Bucharest — change to your latitude
 lon=26.1      ; Bucharest — change to your longitude
+
+[drm]
+; Intel GPU card number — auto-detected at install time via /sys/class/drm/cardN/device/vendor.
+; On kernel >= 5.14 simpledrm takes card0 for EFI framebuffer; i915 gets card1.
+card=1        ; on MacBookPro14,1 with kernel 7.0
 ```
+
+**Why `adjustment-method=drm`:** on GNOME Wayland the `randr` method (X11-only) fails.
+The `drm` method works on both Wayland and X11. The card number is auto-detected at install
+time — if it changes on a new kernel, re-run `macbook_hardware_fixer.sh` step 12.
+
+**Two config files:** the script writes both `/etc/xdg/redshift.conf` (system-wide) and
+`~/.config/redshift.conf` (per-user). On GNOME Wayland `XDG_CONFIG_DIRS` may not include
+`/etc/xdg` at session startup — the per-user file ensures redshift always finds its config.
 
 **Autostart:** `~/.config/autostart/redshift.desktop` — runs `redshift-gtk` on every login.
 
 **Verify:**
 ```bash
-command -v redshift-gtk        # should find the binary
-cat /etc/xdg/redshift.conf     # temp-day=6500, temp-night=4000
-ls ~/.config/autostart/redshift.desktop   # autostart entry
+command -v redshift-gtk                    # should find the binary
+cat ~/.config/redshift.conf                # adjustment-method=drm, card=1
+grep "^card=" ~/.config/redshift.conf      # should print card=1 (or card=0 on older kernels)
+ls ~/.config/autostart/redshift.desktop    # autostart entry
 ```
 
 To adjust manually (without restarting):
