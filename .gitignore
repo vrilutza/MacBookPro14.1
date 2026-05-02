@@ -7,3 +7,4 @@ terminal.log
 .DS_Store
 plan.rtf
 .claude/
+.vscode/

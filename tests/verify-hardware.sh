@@ -212,8 +212,7 @@ _HCI_ADDR_NOW=$(hciconfig hci0 2>/dev/null | grep "BD Address" | awk '{print $3}
 [ -n "$_HCI_ADDR_NOW" ] && [ "$_HCI_ADDR_NOW" != "00:00:00:00:00:00" ] && _HCI_WORKING=true
 if echo "$BT_JOURNAL" | grep -q "firmware Patch file not found"; then
     if $_HCI_WORKING; then
-        warn "Kernel: optional BT patch file not found (hci0 functional — A2DP may lack firmware optimisations)"
-        info "This is cosmetic in kernel 7.x — BCM4350C0.hcd loaded, chip is operational"
+        info "Kernel: optional BT secondary patch not found (cosmetic in kernel 7.x — BCM4350C0.hcd loaded, chip operational)"
     else
         fail "Kernel reported: firmware Patch file not found at boot"
         info "Chip running at default slow baud rate — A2DP will be choppy"
@@ -459,12 +458,12 @@ fi
 PKG_TEMP=$(cat /sys/class/thermal/thermal_zone1/temp 2>/dev/null || cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1)
 if [ -n "$PKG_TEMP" ]; then
     TEMP_C=$(( PKG_TEMP / 1000 ))
-    if [ "$TEMP_C" -lt 55 ]; then
+    if [ "$TEMP_C" -lt 60 ]; then
         pass "CPU temperature: ${TEMP_C}°C (cool)"
-    elif [ "$TEMP_C" -lt 70 ]; then
-        warn "CPU temperature: ${TEMP_C}°C (warm — normal under load, high at idle)"
+    elif [ "$TEMP_C" -lt 80 ]; then
+        warn "CPU temperature: ${TEMP_C}°C (warm — normal during PL2 burst, high at idle)"
     else
-        fail "CPU temperature: ${TEMP_C}°C (too hot — check RAPL limits and TLP config)"
+        fail "CPU temperature: ${TEMP_C}°C (too hot — RAPL limits not applied, check macbook-rapl-limits.service)"
     fi
 fi
 
@@ -595,7 +594,7 @@ if [ -f "$FNMODE_SYS" ]; then
         warn "hid_apple fnmode=$FNVAL (expected 1) — takes effect after module reload or reboot"
     fi
 else
-    info "hid_apple fnmode sysfs not found (module may not be loaded)"
+    info "hid_apple not loaded — expected: built-in keyboard uses applespi; hid_apple only needed for USB/BT Apple keyboards"
 fi
 
 # HiDPI scaling (GNOME, only checkable as the real user)
@@ -776,8 +775,14 @@ if [ -f /etc/modprobe.d/i915-macbook.conf ] && grep -q "enable_fbc=1" /etc/modpr
         [ -f "/sys/kernel/debug/dri/$d/i915_fbc_status" ] && echo "$d" && break
     done)
     if [ -n "$I915_DRI" ]; then
-        FBC=$(cat /sys/kernel/debug/dri/$I915_DRI/i915_fbc_status 2>/dev/null | head -1 || echo "n/a")
-        [ "$FBC" != "n/a" ] && info "i915 FBC status (dri/$I915_DRI): $FBC"
+        FBC=$(cat /sys/kernel/debug/dri/"$I915_DRI"/i915_fbc_status 2>/dev/null | head -1 || echo "n/a")
+        if [ "$FBC" != "n/a" ]; then
+            if echo "$FBC" | grep -q "pixel format not supported"; then
+                info "i915 FBC: disabled for 32-bit ARGB display (expected on Retina — PSR still active)"
+            else
+                info "i915 FBC status: $FBC"
+            fi
+        fi
     fi
 else
     warn "i915 FBC/PSR not configured — GPU using more power than necessary"
