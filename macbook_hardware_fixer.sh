@@ -224,6 +224,9 @@ if re.search(r'(?m)^\[Policy\]', content):
             continue  # skip duplicate
         new_lines.append(line)
     content = ''.join(new_lines)
+else:
+    # [Policy] section absent (non-standard config) — append it
+    content = content.rstrip('\n') + '\n\n[Policy]\nAutoEnable = true\n'
 
 # ---- [Policy] section: Reconnect settings ----
 if re.search(r'(?m)^ReconnectAttempts\s*=', content):
@@ -663,6 +666,9 @@ ExecStart=/bin/bash -c '\
 [Install]
 WantedBy=multi-user.target
 EOF
+# Reload unit files before enable: new service file must be in systemd's cache
+# or enable --now silently fails on the first run (before any reboot).
+systemctl daemon-reload
 systemctl enable --now macbook-rapl-limits 2>/dev/null || true
 
 # Apply immediately for the current session
@@ -1004,7 +1010,7 @@ ExecStart=/bin/bash -c 'echo 0 > /sys/bus/pci/devices/0000:01:00.0/d3cold_allowe
 [Install]
 WantedBy=multi-user.target
 EOF
-
+systemctl daemon-reload
 systemctl enable --now macbook-nvme-d3cold 2>/dev/null || true
 
 # Apply immediately for the current session

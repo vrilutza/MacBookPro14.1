@@ -698,7 +698,7 @@ step "10/12 — System & Development optimizations"
 # ZRAM
 if zramctl 2>/dev/null | grep -q "^/dev/zram"; then
     pass "ZRAM swap active (compressed RAM swap)"
-    ZRAM_INFO=$(zramctl --noheadings --output NAME,SIZE,USED,ALGORITHM 2>/dev/null | head -1)
+    ZRAM_INFO=$(zramctl --noheadings --output NAME,DISKSIZE,DATA,ALGORITHM 2>/dev/null | head -1)
     info "ZRAM: $ZRAM_INFO"
 elif [ -f /etc/systemd/zram-generator.conf ]; then
     warn "ZRAM config present but no /dev/zram device active — takes effect after reboot"
