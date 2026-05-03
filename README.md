@@ -35,8 +35,10 @@ Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery ·
 - **Battery life**: expect under 4 hours. Panel Self-Refresh (PSR), NVMe APST, and
   Thunderbolt power management are not fully working — these components consume more
   power than on macOS.
-- **Audio microphone input**: internal microphone does not work on MacBookPro14,1.
-  External USB/HDMI audio works fine as a workaround.
+- **Audio microphone input**: raw level is very low (CS8409/CS42L83 outputs the signal
+  without hardware amplification). Fixed automatically by the PipeWire filter-chain DSP
+  installed by `macbook_hardware_fixer.sh` step 0 — the virtual source "MacBook Pro Mic (DSP)"
+  applies noise gate + auto-gain and is set as default capture device.
 - **Bluetooth A2DP audio**: choppy without BCM4350C0 firmware (see Bluetooth section below).
   Basic scan and pairing work without firmware.
 - **Suspend/resume**: works with s2idle + NVMe d3cold fix (both applied by
@@ -69,8 +71,8 @@ sudo apt-get update && sudo apt-get install -y \
 
 **Step 2 — Clone this repository:**
 ```bash
-git clone https://github.com/vrilutza/snd_hda_macbookpro.git
-cd snd_hda_macbookpro
+git clone https://github.com/vrilutza/MacBookPro14.1.git
+cd MacBookPro14.1
 ```
 
 **Step 3 — Install all hardware drivers** (Audio, GPU, Bluetooth, WiFi, Camera,
