@@ -1,7 +1,7 @@
-# MacBook Pro 13" 2017 — Ubuntu 26.04 Hardware Guide
+# MacBook Pro 13" 2017 — Ubuntu / Xubuntu 26.04 Hardware Guide
 
 Complete hardware support guide and drivers for **MacBook Pro 13" 2017 (MacBookPro14,1)**
-running Ubuntu 26.04.
+running Ubuntu 26.04 (GNOME) or Xubuntu 26.04 (Xfce 4.20).
 
 Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery · Fan · Touchpad · Suspend · **Color Calibration**
 
@@ -12,7 +12,7 @@ Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery ·
 | Component | Chip | Status | Fixed by |
 |---|---|---|---|
 | Audio (speakers + headphones) | Cirrus CS8409 / CS42L83 | ✅ Works | `macbook_hardware_fixer.sh` step 0 |
-| Audio (microphone) | Cirrus CS8409 | ⚠️ Low level | Requires PulseEffects for amplification |
+| Audio (microphone) | Cirrus CS8409 | ✅ Works | PipeWire filter-chain DSP (noise gate + autogain) — `macbook_hardware_fixer.sh` step 0 |
 | Intel GPU | Iris Plus 640 (Kaby Lake GT3) | ✅ Works + VA-API | `macbook_hardware_fixer.sh` step 1 |
 | WiFi | Broadcom BCM4350 | ✅ Works | `macbook_hardware_fixer.sh` step 3 |
 | Bluetooth | Broadcom BCM4350C0 (UART) | ⚠️ SMC Reset needed once + firmware for A2DP | `macbook_hardware_fixer.sh` step 2 · `bluetooth/bluetooth.sh` |
@@ -515,12 +515,15 @@ sudo depmod -a
 - Output: set to **Analogue Stereo Output**
 - Input: set to **Analogue Stereo Duplex**
 
-**Microphone:** the recorded level is low (same as macOS raw level).
-The script installs an **EasyEffects mic preset** (`macbook-mic-noisegate.json`) with:
-- Noise gate (removes background hiss between speech)
-- Auto-gain (normalises input level)
+**Microphone:** the recorded level is low (same as macOS raw level — CS8409/CS42L83
+outputs the raw signal; Apple applies DSP in CoreAudio, not in hardware).
+The script installs a **system-level PipeWire filter-chain** (no GUI required) with:
+- Noise gate (LADSPA `gate_1408`, threshold −26 dB — removes fan noise between speech)
+- Auto-gain compressor (LADSPA `sc4_1882`, makeup +18 dB — normalises input level)
 
-Load the preset in EasyEffects → Presets → Input → `macbook-mic-noisegate`.
+The virtual source **"MacBook Pro Mic (DSP)"** is set as the default capture device via
+WirePlumber — transparent to all applications (video calls, recording software, etc.).
+To bypass DSP and use the raw mic, select the original source in your audio settings.
 
 **NOTA BENE:** The direct hardware device `hw:0,0` and `plughw:0,0` have
 **NO volume control** and will be **VERY loud**.
@@ -556,9 +559,9 @@ Applied automatically — no extra tools needed. All settings are persistent acr
 | **earlyoom** | `/etc/default/earlyoom` | Kills hungry processes at 10% free RAM → no freeze |
 | **ulimits** (nofile=65536) | `/etc/security/limits.d/60-macbook-dev.conf` | Node.js / Docker / JVM open many file descriptors |
 | **i915 FBC + PSR** | `/etc/modprobe.d/i915-macbook.conf` | Saves 1-2W GPU power → cooler, longer battery |
-| **HiDPI 2× scaling** | gsettings (GNOME) | 2560×1600 Retina display — without this text is microscopic |
+| **HiDPI 2× scaling** | gsettings (GNOME) / xfconf-query (Xfce) | 2560×1600 Retina display — without this text is microscopic |
 | **Fractional scaling** | gsettings mutter | Enables 150%/175% options in GNOME Display Settings |
-| **GNOME power settings** | gsettings | Power button=suspend, lid=suspend, AC=never-sleep, screen-blank=5min |
+| **Power settings** | gsettings (GNOME) / xfconf-query (Xfce) | Power button=suspend, lid=suspend, AC=never-sleep, screen-blank=5min |
 | **intel-microcode** | apt package | CPU security patches + errata fixes for i5-7360U (Kaby Lake) |
 | **fstrim.timer** | systemd timer | Weekly NVMe TRIM — sustained write speed + SSD longevity |
 | **journald limit** | `/etc/systemd/journald.conf.d/` | Caps logs at 1GB / 2 weeks — prevents disk fill during dev |
@@ -644,67 +647,6 @@ colormgr get-devices
   your session startup manually.
 - For dual-boot: the profile is already on the macOS partition at
   `/Library/ColorSync/Profiles/Displays/Color LCD-*.icc` if you ever need to re-extract it.
-
----
-
-### 13. Night Shift → redshift (colour temperature)
-
-**Script:** `macbook_hardware_fixer.sh` step 12
-
-macOS Night Shift automatically shifts the display to warmer colours at night (reduces
-blue light). The Linux equivalent is **redshift**.
-
-The script installs `redshift-gtk` and configures it with Apple-equivalent colour
-temperatures:
-
-| Mode | Temperature | Equivalent |
-|------|-------------|------------|
-| Day | 6500 K | D65 (neutral white — matches macOS Day setting) |
-| Night | 4000 K | Warm/amber (matches macOS Night Shift "warm" preset) |
-
-**Config:** `/etc/xdg/redshift.conf` and `~/.config/redshift.conf` — edit `lat` / `lon` for your location:
-```ini
-[redshift]
-temp-day=6500
-temp-night=4000
-fade=1
-gamma=1.0
-adjustment-method=drm
-location-provider=manual
-
-[manual]
-lat=44.4      ; Bucharest — change to your latitude
-lon=26.1      ; Bucharest — change to your longitude
-
-[drm]
-; Intel GPU card number — auto-detected at install time via /sys/class/drm/cardN/device/vendor.
-; On kernel >= 5.14 simpledrm takes card0 for EFI framebuffer; i915 gets card1.
-card=1        ; on MacBookPro14,1 with kernel 7.0
-```
-
-**Why `adjustment-method=drm`:** on GNOME Wayland the `randr` method (X11-only) fails.
-The `drm` method works on both Wayland and X11. The card number is auto-detected at install
-time — if it changes on a new kernel, re-run `macbook_hardware_fixer.sh` step 12.
-
-**Two config files:** the script writes both `/etc/xdg/redshift.conf` (system-wide) and
-`~/.config/redshift.conf` (per-user). On GNOME Wayland `XDG_CONFIG_DIRS` may not include
-`/etc/xdg` at session startup — the per-user file ensures redshift always finds its config.
-
-**Autostart:** `~/.config/autostart/redshift.desktop` — runs `redshift-gtk` on every login.
-
-**Verify:**
-```bash
-command -v redshift-gtk                    # should find the binary
-cat ~/.config/redshift.conf                # adjustment-method=drm, card=1
-grep "^card=" ~/.config/redshift.conf      # should print card=1 (or card=0 on older kernels)
-ls ~/.config/autostart/redshift.desktop    # autostart entry
-```
-
-To adjust manually (without restarting):
-```bash
-redshift -x                  # reset (disable colour shift)
-redshift -O 4000             # force 4000K immediately
-```
 
 ---
 
