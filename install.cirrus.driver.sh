@@ -115,20 +115,45 @@ update_dir="/lib/modules/${UNAME}/updates"
 [[ -d $hda_dir ]] && rm -rf $hda_dir
 [[ ! -d $build_dir ]] && mkdir $build_dir
 
-# Ubuntu kernels are significantly modified from mainline (extensive backports).
-# We must use the Ubuntu kernel source, not a mainline tarball.
-# NOTE: HWE kernels are NOT supported — there is no linux-source-* package for them.
-if [ ! -e /usr/src/linux-source-$kernel_version.tar.bz2 ]; then
+# Fetch just sound/hda/ from the Ubuntu kernel git on Launchpad (~5MB sparse clone).
+# Falls back to downloading the full linux-source package (~192MB) if git is unavailable
+# or the Launchpad clone fails (offline, rate-limited, etc.).
+# Cached tarball at /usr/src/linux-source-$kernel_version.tar.bz2 skips both paths.
+fetch_hda_sparse() {
+    local target="$1"
+    local codename
+    codename=$(lsb_release -cs 2>/dev/null) || return 1
+    [ -z "$codename" ] && return 1
+    command -v git >/dev/null 2>&1 || return 1
 
-    echo "Ubuntu kernel source not found: /usr/src/linux-source-$kernel_version.tar.bz2"
-    echo "Attempting to download linux-source-$kernel_version via apt-get download..."
+    local tmp_git
+    tmp_git=$(mktemp -d /tmp/macbook-kern-XXXXXX)
+    echo "Fetching kernel source: sparse clone of sound/hda/ (ubuntu/${codename})..."
+    if git clone --quiet --depth=1 --filter=blob:none --sparse \
+           "https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/${codename}" \
+           "$tmp_git" \
+    && git -C "$tmp_git" sparse-checkout set sound/hda; then
+        mkdir -p "$target"
+        cp -r "$tmp_git/sound/hda/." "$target/"
+        rm -rf "$tmp_git"
+        return 0
+    fi
+    rm -rf "$tmp_git"
+    return 1
+}
 
-    # Use /tmp so that _apt sandbox user can read the downloaded .deb.
-    # apt-get download fails with "Permission denied" when the target directory
-    # lives under a home dir that _apt cannot access (APT sandbox, Ubuntu 20.04+).
+if [ -e /usr/src/linux-source-$kernel_version.tar.bz2 ]; then
+    echo "Extracting kernel sound/hda source..."
+    tar --strip-components=2 -xvf /usr/src/linux-source-$kernel_version.tar.bz2 \
+        --directory="$cur_dir/$build_dir" linux-source-$kernel_version/sound/hda
+
+elif fetch_hda_sparse "$hda_dir"; then
+    echo "Kernel sound/hda source fetched via sparse clone."
+
+else
+    echo "Sparse clone unavailable — downloading linux-source-${kernel_version} (~192MB)..."
     local_tmp_deb=$(mktemp -d /tmp/macbook-src-XXXXXX)
     pushd "$local_tmp_deb" > /dev/null
-
     set +e
     apt-get download linux-source-$kernel_version
     if [[ $? -ne 0 ]]; then
@@ -139,21 +164,14 @@ if [ ! -e /usr/src/linux-source-$kernel_version.tar.bz2 ]; then
         exit 1
     fi
     set -e
-
     echo "Extracting kernel sound/hda source..."
     dpkg-deb -x *.deb .
-    # Cache tarball so subsequent runs skip the 193MB download
     cp usr/src/linux-source-*/linux-source-*.tar.bz2 \
         /usr/src/linux-source-$kernel_version.tar.bz2 2>/dev/null || true
     tar --strip-components=2 -xvf usr/src/linux-source-*/linux-source-*.tar.bz2 \
         --directory="$cur_dir/$build_dir" linux-source-$kernel_version/sound/hda
-
     popd > /dev/null
     rm -rf "$local_tmp_deb"
-
-else
-    tar --strip-components=2 -xvf /usr/src/linux-source-$kernel_version.tar.bz2 \
-        --directory="$cur_dir/$build_dir" linux-source-$kernel_version/sound/hda
 fi
 
 # Replace upstream Makefiles with our custom ones
