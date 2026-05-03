@@ -78,6 +78,29 @@ fi
 sed -i 's/^BUILT_MODULE_LOCATION\[0\].*$/BUILT_MODULE_LOCATION[0]="build\/hda"/' dkms.conf
 sed -i 's/^PRE_BUILD.*$/PRE_BUILD="install.cirrus.driver.pre617.sh -k $kernelver --dkms"/' dkms.conf
 
+find_cs8409_module() {
+    find /lib/modules/"$UNAME" -type f -name 'snd-hda-codec-cs8409.ko*' 2>/dev/null | sort | head -n1 || true
+}
+
+ensure_cs8409_module_in_updates() {
+    local module_path
+    module_path="$(find_cs8409_module)"
+    local preferred_dir="/lib/modules/${UNAME}/updates/codecs/cirrus"
+
+    if [ -z "$module_path" ]; then
+        echo "Warning: CS8409 module not found under /lib/modules/$UNAME."
+        return 1
+    fi
+
+    mkdir -p "$preferred_dir"
+    if [[ "$module_path" != "$preferred_dir/"* ]]; then
+        cp -a "$module_path" "$preferred_dir/"
+        echo "Copied CS8409 driver from $module_path to $preferred_dir/"
+    fi
+
+    depmod -a "$UNAME"
+}
+
 if [[ $dkms_action == 'install' ]]; then
 
     # Remove any non-dkms module to avoid filename conflicts under /lib/modules/{kernel}/
@@ -85,12 +108,10 @@ if [[ $dkms_action == 'install' ]]; then
     [[ -e $update_dir/snd-hda-codec-cs8409.ko ]] && rm $update_dir/snd-hda-codec-cs8409.ko && echo "removed $update_dir/snd-hda-codec-cs8409.ko"
 
     bash dkms.sh
+    ensure_cs8409_module_in_updates || true
 
-    # Ubuntu installs dkms modules to updates/dkms, ignoring DEST_MODULE_LOCATION.
-    # Using updates/ ensures the original kernel module is not overwritten.
-    update_dir="/lib/modules/${UNAME}/updates"
     echo -e "\ncontents of $update_dir"
-    ls -lA $update_dir
+    find /lib/modules/"${UNAME}"/updates -type f -name 'snd-hda-codec-cs8409.ko*' 2>/dev/null | sort || true
     exit
 
 elif [[ $dkms_action == 'remove' ]]; then
@@ -187,6 +208,7 @@ if [[ ! $dkms = true ]]; then
         make KERNELRELEASE=$UNAME
         make install KERNELRELEASE=$UNAME
     fi
+    ensure_cs8409_module_in_updates || true
     echo -e "\ncontents of $update_dir"
-    ls -lA $update_dir
+    find /lib/modules/"${UNAME}"/updates -type f -name 'snd-hda-codec-cs8409.ko*' 2>/dev/null | sort || true
 fi

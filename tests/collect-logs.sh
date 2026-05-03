@@ -39,6 +39,25 @@ run_user() {
     fi
 }
 
+check_cs8409_suggestion() {
+    local preferred="/lib/modules/$(uname -r)/updates/codecs/cirrus/snd-hda-codec-cs8409.ko"
+    local dkms="/lib/modules/$(uname -r)/updates/dkms/snd-hda-codec-cs8409.ko"
+
+    if [ -e "$preferred" ]; then
+        echo "CS8409 driver file is in the expected updates/codecs/cirrus path."
+        return
+    fi
+
+    if [ -e "$dkms" ]; then
+        echo "Driver is installed in updates/dkms but not in updates/codecs/cirrus."
+        echo "Suggested fix: sudo ./install.cirrus.driver.sh && sudo depmod -a"
+        return
+    fi
+
+    echo "CS8409 driver file is not found in /lib/modules/$(uname -r)/updates."
+    echo "Suggested fix: sudo ./install.cirrus.driver.sh && sudo depmod -a"
+}
+
 # ── Header ──────────────────────────────────────────────────────────────────
 printf 'MacBook Pro 14,1 — Hardware Diagnostics\n' > "$OUTFILE"
 printf 'Generated: %s\n' "$(date)" >> "$OUTFILE"
@@ -69,6 +88,8 @@ run "ALSA capture"      "arecord -l 2>/dev/null"
 run "ALSA cards"        "cat /proc/asound/cards"
 run "HDA codec"         "cat /proc/asound/card0/codec#0 2>/dev/null | head -40"
 run "dmesg — audio"     "dmesg | grep -i -E 'cs8409|cirrus|hda_codec|snd_hda|sound' | head -60"
+run "CS8409 module files" "find /lib/modules/$(uname -r)/updates -type f -name '*cs8409*.ko*' 2>/dev/null | sort || echo 'none found'"
+run "CS8409 fix suggestion" "check_cs8409_suggestion"
 run "PipeWire DSP conf" "cat /etc/pipewire/pipewire.conf.d/99-macbook-mic-dsp.conf 2>/dev/null"
 run "WirePlumber conf"  "cat /etc/wireplumber/wireplumber.conf.d/52-macbook-mic-default.conf 2>/dev/null"
 run_user "PipeWire status" systemctl --user status pipewire wireplumber

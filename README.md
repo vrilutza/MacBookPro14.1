@@ -112,6 +112,13 @@ sudo ./tests/verify-hardware.sh   # for complete Bluetooth config check
 ./tests/verify-installation.sh
 ```
 
+### Collect debug logs for troubleshooting
+If verification reports a missing CS8409 module, generate a full diagnostics file with:
+```bash
+sudo ./tests/collect-logs.sh /tmp/macbook-diag-$(date +%Y%m%d-%H%M%S).txt
+```
+That file includes the CS8409 module layout and a suggested fix when the driver is present only in `updates/dkms`.
+
 ---
 
 ## Hardware Components
