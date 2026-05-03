@@ -514,6 +514,8 @@ sudo ./install.cirrus.driver.sh -i    # install with DKMS
 sudo ./install.cirrus.driver.sh -r    # remove DKMS registration
 ```
 
+The installer now ensures the built module is present in `/lib/modules/$(uname -r)/updates/codecs/cirrus/` even when DKMS stores the active module under `updates/dkms`.
+
 **Remove driver:**
 ```bash
 sudo rm /lib/modules/$(uname -r)/updates/codecs/cirrus/snd-hda-codec-cs8409.ko

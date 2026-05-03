@@ -64,6 +64,117 @@ cleanup_xfce_fractional_scaling() {
     fi
 }
 
+write_xfce_xsettings_xml() {
+    if [ -z "$REAL_HOME" ]; then
+        return 0
+    fi
+    local xfconf_dir="$REAL_HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+    local xset_xml="$xfconf_dir/xsettings.xml"
+    mkdir -p "$xfconf_dir"
+    if [ ! -f "$xset_xml" ]; then
+        cat > "$xset_xml" << 'XFEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Gdk" type="empty">
+    <property name="WindowScalingFactor" type="int" value="2"/>
+  </property>
+  <property name="Xft" type="empty">
+    <property name="DPI" type="int" value="192"/>
+  </property>
+</channel>
+XFEOF
+        chown "$REAL_USER:$REAL_USER" "$xset_xml"
+    fi
+}
+
+write_gnome_monitors_xml() {
+    if [ -z "$REAL_HOME" ]; then
+        return 0
+    fi
+    local monitors_xml="$REAL_HOME/.config/monitors.xml"
+    mkdir -p "$(dirname "$monitors_xml")"
+    if [ ! -f "$monitors_xml" ]; then
+        cat > "$monitors_xml" << 'MONEOF'
+<monitors version="2">
+  <configuration>
+    <logicalmonitor>
+      <x>0</x>
+      <y>0</y>
+      <scale>1.75</scale>
+      <primary>yes</primary>
+      <monitor>
+        <monitorspec>
+          <connector>eDP-1</connector>
+          <vendor>APP</vendor>
+          <product>Color LCD</product>
+          <serial>0x00000000</serial>
+        </monitorspec>
+        <mode>
+          <width>2560</width>
+          <height>1600</height>
+          <rate>60.000</rate>
+        </mode>
+      </monitor>
+    </logicalmonitor>
+  </configuration>
+</monitors>
+MONEOF
+        chown "$REAL_USER:$REAL_USER" "$monitors_xml"
+    fi
+}
+
+configure_gnome_touchpad_keyboard() {
+    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad tap-to-click true
+    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad natural-scroll true
+    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad two-finger-scrolling-enabled true
+    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad disable-while-typing true
+    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad click-method 'fingers'
+    run_as_user gsettings set org.gnome.desktop.peripherals.keyboard numlock-state false
+    log_ok "Touchpad: tap-to-click, natural scroll, two-finger scroll enabled (GNOME)."
+}
+
+configure_gnome_hidpi() {
+    run_as_user gsettings set org.gnome.desktop.interface scaling-factor 2
+    run_as_user gsettings set org.gnome.desktop.interface text-scaling-factor 1.0
+    run_as_user gsettings set org.gnome.mutter experimental-features "['scale-monitor-framebuffer', 'xwayland-native-scaling']"
+    if [ -n "$REAL_HOME" ]; then
+        write_gnome_monitors_xml
+    fi
+    log_ok "HiDPI: 1.75× fractional scale set (~1440×900 effective, like macOS 'More Space')."
+    log_info "To change: Settings → Displays → Scale (125% / 150% / 175% / 200% available)."
+}
+
+configure_gnome_power() {
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power power-button-action suspend
+    run_as_user gsettings set org.gnome.desktop.session idle-delay 300
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power idle-dim false
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power lid-close-ac-action suspend
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power lid-close-battery-action suspend
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 1200
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type suspend
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type nothing
+    log_ok "GNOME power: button=suspend, lid=suspend, screen-blank=5min, AC=never-sleep."
+}
+
+configure_xfce_hidpi_power() {
+    xfconf_set xsettings /Gdk/WindowScalingFactor int 2
+    xfconf_set xsettings /Xft/DPI               int 192
+    write_xfce_xsettings_xml
+    cleanup_xfce_fractional_scaling
+    log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 → 1280×800 logical)."
+    log_info "Fractional xrandr scaling is disabled by default on Xfce/X11 because it often looks blurry."
+    xfconf_set xfce4-power-manager /xfce4-power-manager/lid-action-on-battery    uint 1
+    xfconf_set xfce4-power-manager /xfce4-power-manager/lid-action-on-ac         uint 1
+    xfconf_set xfce4-power-manager /xfce4-power-manager/power-button-action      uint 1
+    xfconf_set xfce4-power-manager /xfce4-power-manager/blank-on-battery         uint 5
+    xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-battery    uint 20
+    xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-ac         uint 0
+    xfconf_set xfce4-power-manager /xfce4-power-manager/brightness-on-battery    int -1
+    xfconf_set xfce4-power-manager /xfce4-power-manager/brightness-on-ac         int -1
+    log_ok "Xfce 4.20 power: lid=suspend, button=suspend, blank=5min, brightness always max."
+}
+
 # --- Root check ---
 if [ "$EUID" -ne 0 ]; then
     log_err "Please run as root: sudo ./macbook_hardware_fixer.sh"
@@ -906,142 +1017,12 @@ if [ -n "$REAL_USER" ]; then
     REAL_UID=$(id -u "$REAL_USER")
     DBUS_ADDR="unix:path=/run/user/${REAL_UID}/bus"
 
-    run_as_user() {
-        sudo -u "$REAL_USER" DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" "$@" 2>/dev/null || true
-    }
+    configure_gnome_touchpad_keyboard
+    configure_gnome_hidpi
+    configure_gnome_power
 
-    # Touchpad: Apple SPI Touchpad on MacBook Pro 14,1
-    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad tap-to-click true
-    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad natural-scroll true
-    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad two-finger-scrolling-enabled true
-    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad disable-while-typing true
-    run_as_user gsettings set org.gnome.desktop.peripherals.touchpad click-method 'fingers'
-
-    # Keyboard: fn-key behaviour (treat F-keys as standard F1-F12 by default)
-    run_as_user gsettings set org.gnome.desktop.peripherals.keyboard numlock-state false
-
-    log_ok "Touchpad: tap-to-click, natural scroll, two-finger scroll enabled (GNOME)."
-
-    # --- HiDPI: 1.75× fractional scaling for MacBook Pro 2560×1600 Retina display ---
-    # Targets ~1463×914 effective (closest to macOS "Looks like 1440×900" / "More Space").
-    # scaling-factor=2 remains as Xwayland/legacy fallback (apps that ignore fractional).
-    # text-scaling-factor=1.0 — fonts are already correct at 1.75× compositor scale.
-    run_as_user gsettings set org.gnome.desktop.interface scaling-factor 2
-    run_as_user gsettings set org.gnome.desktop.interface text-scaling-factor 1.0
-
-    # Enable fractional scaling compositor feature (required for 1.75× to work).
-    run_as_user gsettings set org.gnome.mutter experimental-features \
-        "['scale-monitor-framebuffer', 'xwayland-native-scaling']"
-
-    # Write monitors.xml so GNOME Wayland applies 1.75× scale automatically on first boot.
-    # GNOME reads this at session start; if EDID matches, 1.75× overrides the 2× fallback.
-    # MacBook Pro 14,1 internal display: connector=eDP-1, vendor=APP, product=Color LCD.
-    if [ -n "$REAL_HOME" ]; then
-        MONITORS_XML="$REAL_HOME/.config/monitors.xml"
-        mkdir -p "$(dirname "$MONITORS_XML")"
-        # Only write if user has not already customised display settings.
-        if [ ! -f "$MONITORS_XML" ]; then
-            cat > "$MONITORS_XML" << 'MONEOF'
-<monitors version="2">
-  <configuration>
-    <logicalmonitor>
-      <x>0</x>
-      <y>0</y>
-      <scale>1.75</scale>
-      <primary>yes</primary>
-      <monitor>
-        <monitorspec>
-          <connector>eDP-1</connector>
-          <vendor>APP</vendor>
-          <product>Color LCD</product>
-          <serial>0x00000000</serial>
-        </monitorspec>
-        <mode>
-          <width>2560</width>
-          <height>1600</height>
-          <rate>60.000</rate>
-        </mode>
-      </monitor>
-    </logicalmonitor>
-  </configuration>
-</monitors>
-MONEOF
-            chown "$REAL_USER:$REAL_USER" "$MONITORS_XML"
-        fi
-    fi
-    log_ok "HiDPI: 1.75× fractional scale set (~1440×900 effective, like macOS 'More Space')."
-    log_info "To change: Settings → Displays → Scale (125% / 150% / 175% / 200% available)."
-
-    # --- GNOME Power settings ---
-    # Power button: suspend instead of opening shutdown dialog
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power power-button-action suspend
-
-    # Screen blank: 5 minutes idle (default is often 2 min — too aggressive for coding)
-    run_as_user gsettings set org.gnome.desktop.session idle-delay 300
-
-    # Keep brightness at maximum — no auto-dim (user preference: always max)
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power idle-dim false
-
-    # Sleep on lid close (both AC and battery)
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power lid-close-ac-action suspend
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power lid-close-battery-action suspend
-
-    # Sleep when inactive (battery: 20 min, AC: never during dev sessions)
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 1200
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type suspend
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type nothing
-
-    log_ok "GNOME power: button=suspend, lid=suspend, screen-blank=5min, AC=never-sleep."
-
-    # --- Xfce 4.20 (Xubuntu): HiDPI + power via xfconf-query ---
-    # xfconf-query is the Xfce settings backend (equivalent of gsettings for GNOME).
-    # Silently skipped on non-Xfce systems (command not found → || true in run_as_user).
     if command -v xfconf-query &>/dev/null; then
-        # HiDPI: WindowScalingFactor=2 makes GTK apps render at 2× on Retina.
-        # Xft/DPI=192 (96×2) ensures fonts scale correctly across all toolkits.
-        xfconf_set xsettings /Gdk/WindowScalingFactor int 2
-        xfconf_set xsettings /Xft/DPI               int 192
-
-        # Fallback: write xfconf XML directly in case D-Bus session is not running
-        # (e.g. script run from TTY before first login). xfconf-query silently fails
-        # without an active xfconfd, so we write the XML to ensure settings persist.
-        if [ -n "$REAL_HOME" ]; then
-            XFCONF_DIR="$REAL_HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
-            mkdir -p "$XFCONF_DIR"
-            XSET_XML="$XFCONF_DIR/xsettings.xml"
-            if [ ! -f "$XSET_XML" ]; then
-                cat > "$XSET_XML" << 'XFEOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xsettings" version="1.0">
-  <property name="Gdk" type="empty">
-    <property name="WindowScalingFactor" type="int" value="2"/>
-  </property>
-  <property name="Xft" type="empty">
-    <property name="DPI" type="int" value="192"/>
-  </property>
-</channel>
-XFEOF
-                chown "$REAL_USER:$REAL_USER" "$XSET_XML"
-            fi
-        fi
-
-        cleanup_xfce_fractional_scaling
-        log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 → 1280×800 logical)."
-        log_info "Fractional xrandr scaling is disabled by default on Xfce/X11 because it often looks blurry."
-
-        # Power: lid-action 1=suspend, power-button 1=suspend.
-        # blank-on-battery=5 (min), inactivity-on-battery=20 (min), AC idle=0 (never sleep).
-        xfconf_set xfce4-power-manager /xfce4-power-manager/lid-action-on-battery    uint 1
-        xfconf_set xfce4-power-manager /xfce4-power-manager/lid-action-on-ac         uint 1
-        xfconf_set xfce4-power-manager /xfce4-power-manager/power-button-action      uint 1
-        xfconf_set xfce4-power-manager /xfce4-power-manager/blank-on-battery         uint 5
-        xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-battery    uint 20
-        xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-ac         uint 0
-        # brightness-on-battery/ac: -1 = never dim (always max brightness)
-        xfconf_set xfce4-power-manager /xfce4-power-manager/brightness-on-battery    int -1
-        xfconf_set xfce4-power-manager /xfce4-power-manager/brightness-on-ac         int -1
-        log_ok "Xfce 4.20 power: lid=suspend, button=suspend, blank=5min, brightness always max."
+        configure_xfce_hidpi_power
     fi
 fi
 

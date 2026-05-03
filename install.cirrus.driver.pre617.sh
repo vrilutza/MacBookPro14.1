@@ -79,7 +79,11 @@ sed -i 's/^BUILT_MODULE_LOCATION\[0\].*$/BUILT_MODULE_LOCATION[0]="build\/hda"/'
 sed -i 's/^PRE_BUILD.*$/PRE_BUILD="install.cirrus.driver.pre617.sh -k $kernelver --dkms"/' dkms.conf
 
 find_cs8409_module() {
-    find /lib/modules/"$UNAME" -type f -name 'snd-hda-codec-cs8409.ko*' 2>/dev/null | sort | head -n1 || true
+    if [ "$PATCH_CIRRUS" = true ]; then
+        find /lib/modules/"$UNAME" -type f -name 'snd-hda-codec-cirrus.ko*' 2>/dev/null | sort | head -n1 || true
+    else
+        find /lib/modules/"$UNAME" -type f \( -name 'snd-hda-codec-cs8409.ko*' -o -name 'snd-hda-codec-cirrus.ko*' \) 2>/dev/null | sort | head -n1 || true
+    fi
 }
 
 ensure_cs8409_module_in_updates() {
@@ -103,15 +107,21 @@ ensure_cs8409_module_in_updates() {
 
 if [[ $dkms_action == 'install' ]]; then
 
-    # Remove any non-dkms module to avoid filename conflicts under /lib/modules/{kernel}/
-    update_dir="/lib/modules/${UNAME}/updates"
-    [[ -e $update_dir/snd-hda-codec-cs8409.ko ]] && rm $update_dir/snd-hda-codec-cs8409.ko && echo "removed $update_dir/snd-hda-codec-cs8409.ko"
+    # Remove any stale non-DKMS module files before DKMS install.
+    update_dir="/lib/modules/${UNAME}/updates/codecs/cirrus"
+    mkdir -p "$update_dir"
+    for file in "$update_dir"/snd-hda-codec-cs8409.ko "$update_dir"/snd-hda-codec-cirrus.ko; do
+        if [ -e "$file" ]; then
+            rm -f "$file"
+            echo "removed $file"
+        fi
+    done
 
     bash dkms.sh
     ensure_cs8409_module_in_updates || true
 
     echo -e "\ncontents of $update_dir"
-    find /lib/modules/"${UNAME}"/updates -type f -name 'snd-hda-codec-cs8409.ko*' 2>/dev/null | sort || true
+    find /lib/modules/"${UNAME}"/updates -type f \( -name 'snd-hda-codec-cs8409.ko*' -o -name 'snd-hda-codec-cirrus.ko*' \) 2>/dev/null | sort || true
     exit
 
 elif [[ $dkms_action == 'remove' ]]; then
