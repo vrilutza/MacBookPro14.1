@@ -945,7 +945,63 @@ if [ -n "$REAL_USER" ]; then
         # Xft/DPI=192 (96×2) ensures fonts scale correctly across all toolkits.
         xfconf_set xsettings /Gdk/WindowScalingFactor int 2
         xfconf_set xsettings /Xft/DPI               int 192
-        log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 Retina)."
+
+        # Fallback: write xfconf XML directly in case D-Bus session is not running
+        # (e.g. script run from TTY before first login). xfconf-query silently fails
+        # without an active xfconfd, so we write the XML to ensure settings persist.
+        if [ -n "$REAL_HOME" ]; then
+            XFCONF_DIR="$REAL_HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
+            mkdir -p "$XFCONF_DIR"
+            XSET_XML="$XFCONF_DIR/xsettings.xml"
+            if [ ! -f "$XSET_XML" ]; then
+                cat > "$XSET_XML" << 'XFEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Gdk" type="empty">
+    <property name="WindowScalingFactor" type="int" value="2"/>
+  </property>
+  <property name="Xft" type="empty">
+    <property name="DPI" type="int" value="192"/>
+  </property>
+</channel>
+XFEOF
+                chown "$REAL_USER:$REAL_USER" "$XSET_XML"
+            fi
+        fi
+        log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 → 1280×800 logical)."
+
+        # Fractional scaling to match macOS "More Space" (1440×900 effective).
+        # GTK renders at 2× (crisp), xrandr maps virtual 2880×1800 → physical 2560×1600.
+        # Gives 1440×900 logical resolution — more desktop space than 1280×800.
+        if [ -n "$REAL_HOME" ]; then
+            cat > /usr/local/bin/macbook-xrandr-scale.sh << 'XREOF'
+#!/bin/bash
+# MacBook Pro 2560×1600 — fractional HiDPI for Xfce/X11
+# Maps virtual 2880×1800 onto physical 2560×1600 (11% scale-down, barely visible).
+# With GTK WindowScalingFactor=2: logical resolution = 1440×900 (like macOS "More Space").
+OUTPUT=$(xrandr 2>/dev/null | awk '/ connected primary/ {print $1; exit}')
+[ -z "$OUTPUT" ] && OUTPUT=$(xrandr 2>/dev/null | awk '/ connected/ {print $1; exit}')
+[ -z "$OUTPUT" ] && exit 0
+xrandr --output "$OUTPUT" --scale-from 2880x1800
+XREOF
+            chmod +x /usr/local/bin/macbook-xrandr-scale.sh
+
+            AUTOSTART_DIR="$REAL_HOME/.config/autostart"
+            mkdir -p "$AUTOSTART_DIR"
+            cat > "$AUTOSTART_DIR/macbook-xrandr-scale.desktop" << 'DEOF'
+[Desktop Entry]
+Type=Application
+Name=MacBook Pro Display Scale
+Comment=1440x900 fractional HiDPI for MacBook Pro 2560x1600 (Xfce)
+Exec=/bin/bash -c 'sleep 2 && /usr/local/bin/macbook-xrandr-scale.sh'
+Hidden=false
+NoDisplay=true
+OnlyShowIn=XFCE;
+DEOF
+            chown "$REAL_USER:$REAL_USER" "$AUTOSTART_DIR/macbook-xrandr-scale.desktop"
+            log_ok "Display scale: 1440×900 fractional HiDPI autostart installed (Xfce, xrandr scale-from 2880×1800)."
+            log_info "To revert to 1280×800 (2× integer): remove ~/.config/autostart/macbook-xrandr-scale.desktop"
+        fi
 
         # Power: lid-action 1=suspend, power-button 1=suspend.
         # blank-on-battery=5 (min), inactivity-on-battery=20 (min), AC idle=0 (never sleep).
@@ -1411,6 +1467,9 @@ log_info "  git       — fsmonitor + untrackedCache + fetch.parallel=4"
 log_step "11/11 — Display color calibration — Apple factory ICC profile"
 
 apt-get install -y --no-install-recommends colord
+# xfce4-color-manager: Xfce GUI for color profile management (wraps colord).
+# Installs silently if not available (non-Xfce systems skip it harmlessly).
+apt-get install -y --no-install-recommends xfce4-color-manager 2>/dev/null || true
 
 ICC_SRC="$SCRIPT_DIR/firmware/display/Color-LCD-MacBookPro14-1.icc"
 
