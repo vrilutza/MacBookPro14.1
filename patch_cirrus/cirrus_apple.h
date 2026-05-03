@@ -2295,11 +2295,17 @@ static int cs8409_apple(struct hda_codec *codec)
 	//spec->gen.stream_analog_capture = &cs42l83_apple_pcm_analog_capture;
 
 
+static int cs_8409_boot_setup(struct hda_codec *codec);
+static void cs_8409_playback_pcm_hook(struct hda_pcm_stream *hinfo, struct hda_codec *codec,
+                                      struct snd_pcm_substream *substream, int action);
+static void cs_8409_capture_pcm_hook(struct hda_pcm_stream *hinfo, struct hda_codec *codec,
+                                     struct snd_pcm_substream *substream, int action);
+
 	spec->gen.pcm_playback_hook = cs_8409_playback_pcm_hook;
 
 	spec->gen.pcm_capture_hook = cs_8409_capture_pcm_hook;
 
-	spec->gen.automute_hook = cs_8409_automute;
+	//spec->gen.automute_hook = cs_8409_automute;
 
 
 	// so this seems to be how we setup volume controls for the headphones
