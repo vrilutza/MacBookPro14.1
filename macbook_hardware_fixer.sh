@@ -1012,34 +1012,13 @@ XFEOF
         # GTK renders at 2× (crisp), xrandr maps virtual 2880×1800 → physical 2560×1600.
         # Gives 1440×900 logical resolution — more desktop space than 1280×800.
         if [ -n "$REAL_HOME" ]; then
-            cat > /usr/local/bin/macbook-xrandr-scale.sh << 'XREOF'
-#!/bin/bash
-# MacBook Pro 2560×1600 — fractional HiDPI for Xfce/X11
-# Maps virtual 2880×1800 onto physical 2560×1600 (11% scale-down, barely visible).
-# With GTK WindowScalingFactor=2: logical resolution = 1440×900 (like macOS "More Space").
-OUTPUT=$(xrandr 2>/dev/null | awk '/ connected primary/ {print $1; exit}')
-[ -z "$OUTPUT" ] && OUTPUT=$(xrandr 2>/dev/null | awk '/ connected/ {print $1; exit}')
-[ -z "$OUTPUT" ] && exit 0
-xrandr --output "$OUTPUT" --scale-from 2880x1800
-XREOF
-            chmod +x /usr/local/bin/macbook-xrandr-scale.sh
-
-            AUTOSTART_DIR="$REAL_HOME/.config/autostart"
-            mkdir -p "$AUTOSTART_DIR"
-            cat > "$AUTOSTART_DIR/macbook-xrandr-scale.desktop" << 'DEOF'
-[Desktop Entry]
-Type=Application
-Name=MacBook Pro Display Scale
-Comment=1440x900 fractional HiDPI for MacBook Pro 2560x1600 (Xfce)
-Exec=/bin/bash -c 'sleep 2 && /usr/local/bin/macbook-xrandr-scale.sh'
-Hidden=false
-NoDisplay=true
-OnlyShowIn=XFCE;
-DEOF
-            chown "$REAL_USER:$REAL_USER" "$AUTOSTART_DIR/macbook-xrandr-scale.desktop"
-            log_ok "Display scale: 1440×900 fractional HiDPI autostart installed (Xfce, xrandr scale-from 2880×1800)."
-            log_info "To revert to 1280×800 (2× integer): remove ~/.config/autostart/macbook-xrandr-scale.desktop"
+            # Remove any legacy Xfce fractional xrandr autostart created by older versions.
+            rm -f "$REAL_HOME/.config/autostart/macbook-xrandr-scale.desktop"
+            rm -f /usr/local/bin/macbook-xrandr-scale.sh
         fi
+
+        log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 → 1280×800 logical)."
+        log_info "Fractional xrandr scaling is disabled by default on Xfce/X11 because it often looks blurry."
 
         # Power: lid-action 1=suspend, power-button 1=suspend.
         # blank-on-battery=5 (min), inactivity-on-battery=20 (min), AC idle=0 (never sleep).

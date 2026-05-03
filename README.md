@@ -569,7 +569,7 @@ Applied automatically — no extra tools needed. All settings are persistent acr
 | **ulimits** (nofile=65536) | `/etc/security/limits.d/60-macbook-dev.conf` | Node.js / Docker / JVM open many file descriptors |
 | **i915 FBC + PSR** | `/etc/modprobe.d/i915-macbook.conf` | Saves 1-2W GPU power → cooler, longer battery |
 | **HiDPI 2× scaling** | gsettings (GNOME) / xfconf-query (Xfce) | 2560×1600 Retina display — without this text is microscopic |
-| **Fractional scaling** | gsettings mutter | Enables 150%/175% options in GNOME Display Settings |
+| **Fractional scaling** | gsettings mutter (GNOME/Wayland only) | Enables 150%/175% options in GNOME Display Settings |
 | **Power settings** | gsettings (GNOME) / xfconf-query (Xfce) | Power button=suspend, lid=suspend, AC=never-sleep, screen-blank=5min |
 | **intel-microcode** | apt package | CPU security patches + errata fixes for i5-7360U (Kaby Lake) |
 | **fstrim.timer** | systemd timer | Weekly NVMe TRIM — sustained write speed + SSD longevity |
