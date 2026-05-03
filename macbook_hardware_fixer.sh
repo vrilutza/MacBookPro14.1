@@ -80,6 +80,97 @@ else
     log_info "Clone the full repo to get audio driver support: git clone <repo-url>"
 fi
 
+# --- PipeWire filter-chain: mic DSP (noise gate + autogain) at system level ---
+# The CS8409/CS42L83 codec outputs raw mic signal at very low level — Apple applies
+# BeamForming + noise gate + AGC in CoreAudio (software), not in hardware.
+# Without processing: mic is too quiet and picks up fan noise (4500-6500 RPM).
+#
+# We replicate macOS mic DSP using PipeWire filter-chain + LSP Plugins LADSPA:
+#   - gate_1408 (stereo gate): threshold -26dB, attack 20ms, release 250ms, range -90dB
+#   - sc4_1882  (SC4 compressor as autogain): makeup +18dB, ratio 10:1 → targets ~-18dBFS
+#
+# The virtual source "MacBook Pro Mic (DSP)" is set as default capture device via
+# WirePlumber. Applications pick it up automatically — no GUI or user action needed.
+apt-get install -y --no-install-recommends lsp-plugins-ladspa
+
+mkdir -p /etc/pipewire/pipewire.conf.d
+cat > /etc/pipewire/pipewire.conf.d/99-macbook-mic-dsp.conf << 'EOF'
+# MacBook Pro 13" 2017 (MacBookPro14,1) — mic DSP via PipeWire filter-chain
+# Noise gate: threshold -26dB, attack 20ms, release 250ms (matches macOS CoreAudio gate)
+# SC4 compressor: +18dB makeup, 10:1 ratio → autogain to approx -18dBFS target
+context.modules = [
+  {
+    name = libpipewire-module-filter-chain
+    args = {
+      node.description = "MacBook Pro Mic (DSP)"
+      media.name       = "MacBook Pro Mic (DSP)"
+      filter.graph = {
+        nodes = [
+          {
+            type    = ladspa
+            name    = gate
+            plugin  = gate_1408
+            label   = gate
+            control = {
+              "Attack (ms)"    =   20.0
+              "Hold (ms)"      =    0.0
+              "Decay (ms)"     =  250.0
+              "Range (dB)"     =  -90.0
+              "Threshold (dB)" =  -26.0
+              "Output select (-1 = gate, 0 = bypass, 1 = control sig)" = -1
+            }
+          }
+          {
+            type    = ladspa
+            name    = autogain
+            plugin  = sc4_1882
+            label   = sc4
+            control = {
+              "RMS/peak"             =   0.0
+              "Attack time (ms)"     =   1.5
+              "Release time (ms)"    = 401.0
+              "Threshold level (dB)" = -40.0
+              "Ratio (1:n)"          =  10.0
+              "Knee radius (dB)"     =   3.97
+              "Makeup gain (dB)"     =  18.0
+            }
+          }
+        ]
+        links = [
+          { output = "gate:Out"  input = "autogain:Left input" }
+          { output = "gate:Out"  input = "autogain:Right input" }
+        ]
+      }
+      capture.props = {
+        node.name      = "capture.macbook_mic_dsp"
+        node.passive   = true
+        audio.position = [ FL ]
+      }
+      playback.props = {
+        node.name        = "playback.macbook_mic_dsp"
+        media.class      = "Audio/Source/Virtual"
+        audio.position   = [ FL FR ]
+        priority.session = 1500
+      }
+    }
+  }
+]
+EOF
+log_ok "PipeWire mic DSP config installed: noise gate + autogain (CS8409 raw mic compensation)."
+log_info "Virtual source 'MacBook Pro Mic (DSP)' will appear as default capture device."
+
+# WirePlumber: set the DSP virtual source as default capture device
+mkdir -p /etc/wireplumber/wireplumber.conf.d
+cat > /etc/wireplumber/wireplumber.conf.d/52-macbook-mic-default.conf << 'EOF'
+# MacBook Pro — set DSP-processed virtual mic as default capture source.
+# Ensures applications use the noise-gated + autogained source automatically.
+wireplumber.settings = {
+  default.audio.source = "playback.macbook_mic_dsp"
+}
+EOF
+log_ok "WirePlumber: 'MacBook Pro Mic (DSP)' set as default capture source."
+log_info "To use raw mic (no DSP): select the original source in your app's audio settings."
+
 # =============================================================================
 # STEP 1: System update + Intel GPU VA-API acceleration
 # =============================================================================
@@ -823,9 +914,8 @@ if [ -n "$REAL_USER" ]; then
     # Screen blank: 5 minutes idle (default is often 2 min — too aggressive for coding)
     run_as_user gsettings set org.gnome.desktop.session idle-delay 300
 
-    # Dim screen on battery after 30s idle (saves power while reading)
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power idle-dim true
-    run_as_user gsettings set org.gnome.settings-daemon.plugins.power idle-brightness 30
+    # Keep brightness at maximum — no auto-dim (user preference: always max)
+    run_as_user gsettings set org.gnome.settings-daemon.plugins.power idle-dim false
 
     # Sleep on lid close (both AC and battery)
     run_as_user gsettings set org.gnome.settings-daemon.plugins.power lid-close-ac-action suspend
@@ -865,7 +955,10 @@ if [ -n "$REAL_USER" ]; then
         xfconf_set xfce4-power-manager /xfce4-power-manager/blank-on-battery         uint 5
         xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-battery    uint 20
         xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-ac         uint 0
-        log_ok "Xfce 4.20 power: lid=suspend, button=suspend, blank=5min on battery, AC=never-sleep."
+        # brightness-on-battery/ac: -1 = never dim (always max brightness)
+        xfconf_set xfce4-power-manager /xfce4-power-manager/brightness-on-battery    int -1
+        xfconf_set xfce4-power-manager /xfce4-power-manager/brightness-on-ac         int -1
+        log_ok "Xfce 4.20 power: lid=suspend, button=suspend, blank=5min, brightness always max."
     fi
 fi
 
@@ -925,6 +1018,38 @@ if [ -n "$REAL_USER" ]; then
 fi
 log_ok "brightnessctl installed."
 log_info "Test: brightnessctl set 50%"
+
+# --- Disable ALS adaptive brightness (iio-sensor-proxy) ---
+# acpi_osi=Darwin (set in GRUB below) tells the Apple BIOS to expose macOS ACPI tables,
+# which include an Ambient Light Sensor (ALS) device. On Ubuntu, iio-sensor-proxy
+# picks up this ALS and automatically adjusts screen brightness → unwanted behavior.
+# User preference: brightness always at maximum, never auto-adjusted.
+if dpkg -l iio-sensor-proxy &>/dev/null 2>&1 || \
+   systemctl is-enabled iio-sensor-proxy &>/dev/null 2>&1; then
+    systemctl disable --now iio-sensor-proxy 2>/dev/null || true
+    log_ok "iio-sensor-proxy disabled — ALS adaptive brightness off (always max)."
+else
+    log_ok "iio-sensor-proxy not present — no ALS adaptive brightness to disable."
+fi
+
+# --- Autostart: set brightness to 100% on every login ---
+# Ensures brightness is always maximum even if a previous session left it lower.
+if [ -n "$REAL_HOME" ]; then
+    BRIGHTNESS_AUTOSTART_DIR="$REAL_HOME/.config/autostart"
+    mkdir -p "$BRIGHTNESS_AUTOSTART_DIR"
+    cat > "$BRIGHTNESS_AUTOSTART_DIR/macbook-brightness-max.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=MacBook Pro Brightness Max
+Comment=Set display brightness to maximum at login (MacBook Pro 13" 2017)
+Exec=/usr/bin/brightnessctl set 100%
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+    chown "$REAL_USER:$REAL_USER" "$BRIGHTNESS_AUTOSTART_DIR/macbook-brightness-max.desktop"
+    log_ok "Autostart: brightness set to 100% at every login."
+fi
 
 # --- Suspend/Sleep: use s2idle instead of deep (S3) ---
 # MacBook Pro 14,1 does NOT support proper S3 (deep) sleep on Linux.
@@ -1392,7 +1517,7 @@ COLOREOF
 Type=Application
 Name=MacBook Pro LCD Color Profile
 Comment=Apply Apple factory color calibration for the built-in display
-Exec=/usr/local/bin/macbook-color-profile.sh
+Exec=/bin/bash -c 'sleep 8 && /usr/local/bin/macbook-color-profile.sh'
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

@@ -890,6 +890,14 @@ if command -v colormgr &>/dev/null; then
     else
         info "colord: profile not registered in current session (normal — registered on user login via autostart)"
     fi
+    # Check if profile is actually assigned to the display device
+    _ASSIGNED=$(colormgr get-devices 2>/dev/null | \
+        grep -A5 -i "eDP\|Color LCD\|apple\|MacBook" | grep "Profile ID" | head -1)
+    if [ -n "$_ASSIGNED" ]; then
+        pass "colord: ICC profile activ asignat displayului ($ICC_NAME)"
+    else
+        info "colord: profilul nu e asignat în sesiunea curentă (normal dacă nu e logat ca user)"
+    fi
 else
     warn "colormgr not installed — color profile assignment will not work"
     info "Fix: sudo apt-get install colord"
