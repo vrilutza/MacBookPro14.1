@@ -6,6 +6,9 @@
 # Run once after a fresh Ubuntu install:
 #   sudo bash macbook_hardware_fixer.sh
 #
+# Optional Xfce fractional scaling:
+#   MACBOOK_XFCE_FRACTIONAL_SCALE=1 sudo bash macbook_hardware_fixer.sh
+#
 # Hardware covered (0-11, 12 steps total):
 #    0. Cirrus Logic CS8409        — HDA audio kernel driver
 #    1. Intel Iris Plus 640 GPU    — VA-API hardware acceleration
@@ -68,23 +71,83 @@ write_xfce_xsettings_xml() {
     if [ -z "$REAL_HOME" ]; then
         return 0
     fi
+    local scale="${1:-2}" dpi="${2:-192}"
     local xfconf_dir="$REAL_HOME/.config/xfce4/xfconf/xfce-perchannel-xml"
     local xset_xml="$xfconf_dir/xsettings.xml"
     mkdir -p "$xfconf_dir"
     if [ ! -f "$xset_xml" ]; then
-        cat > "$xset_xml" << 'XFEOF'
+        cat > "$xset_xml" << XFEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xsettings" version="1.0">
   <property name="Gdk" type="empty">
-    <property name="WindowScalingFactor" type="int" value="2"/>
+    <property name="WindowScalingFactor" type="int" value="$scale"/>
   </property>
   <property name="Xft" type="empty">
-    <property name="DPI" type="int" value="192"/>
+    <property name="DPI" type="int" value="$dpi"/>
   </property>
 </channel>
 XFEOF
         chown "$REAL_USER:$REAL_USER" "$xset_xml"
     fi
+}
+
+write_xfce_xrandr_scale_script() {
+    if [ -z "$REAL_HOME" ]; then
+        return 0
+    fi
+    mkdir -p /usr/local/bin
+    cat > /usr/local/bin/macbook-xrandr-scale.sh << 'EOF'
+#!/bin/bash
+set -e
+
+# Find the first connected display. Prefer the built-in panel if available.
+display=$(xrandr --query 2>/dev/null | awk '/ connected/ {print $1; exit}')
+if [ -z "$display" ]; then
+    exit 0
+fi
+
+# Apply a 1.75× fractional scale to the built-in Retina display on Xfce/X11.
+xrandr --output "$display" --mode 2560x1600 --scale 1.75x1.75 --fb 4480x2800 --dpi 170
+EOF
+    chmod +x /usr/local/bin/macbook-xrandr-scale.sh
+}
+
+create_xfce_xrandr_autostart() {
+    if [ -z "$REAL_HOME" ]; then
+        return 0
+    fi
+    local autostart="$REAL_HOME/.config/autostart/macbook-xrandr-scale.desktop"
+    mkdir -p "$(dirname "$autostart")"
+    cat > "$autostart" << EOF
+[Desktop Entry]
+Type=Application
+Name=MacBook Xfce fractional scaling
+Comment=Apply 1.75× fractional scaling to the built-in Retina display
+Exec=/usr/local/bin/macbook-xrandr-scale.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+EOF
+    chown "$REAL_USER:$REAL_USER" "$autostart"
+}
+
+configure_xfce_fractional_hidpi_power() {
+    xfconf_set xsettings /Gdk/WindowScalingFactor int 1
+    xfconf_set xsettings /Xft/DPI               int 170
+    write_xfce_xsettings_xml 1 170
+    write_xfce_xrandr_scale_script
+    create_xfce_xrandr_autostart
+
+    xfconf_set xfce4-power-manager /xfce4-power-manager/lid-action-on-battery    uint 1
+    xfconf_set xfce4-power-manager /xfce4-power-manager/lid-action-on-ac         uint 1
+    xfconf_set xfce4-power-manager /xfce4-power-manager/power-button-action      uint 1
+    xfconf_set xfce4-power-manager /xfce4-power-manager/blank-on-battery         uint 5
+    xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-battery    uint 20
+    xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-ac         uint 0
+    xfconf_set xfce4-power-manager /xfce4-power-manager/brightness-on-battery    int -1
+    xfconf_set xfce4-power-manager /xfce4-power-manager/brightness-on-ac         int -1
+
+    log_ok "HiDPI: Xfce 4.20 fractional scale 1.75× set via xrandr + DPI 170."
+    log_info "If display appears blurry, remove $REAL_HOME/.config/autostart/macbook-xrandr-scale.desktop."
 }
 
 write_gnome_monitors_xml() {
@@ -160,7 +223,7 @@ configure_gnome_power() {
 configure_xfce_hidpi_power() {
     xfconf_set xsettings /Gdk/WindowScalingFactor int 2
     xfconf_set xsettings /Xft/DPI               int 192
-    write_xfce_xsettings_xml
+    write_xfce_xsettings_xml 2 192
     cleanup_xfce_fractional_scaling
     log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 → 1280×800 logical)."
     log_info "Fractional xrandr scaling is disabled by default on Xfce/X11 because it often looks blurry."
@@ -1022,7 +1085,12 @@ if [ -n "$REAL_USER" ]; then
     configure_gnome_power
 
     if command -v xfconf-query &>/dev/null; then
-        configure_xfce_hidpi_power
+        if [ "${MACBOOK_XFCE_FRACTIONAL_SCALE:-0}" = "1" ]; then
+            log_info "Xfce fractional scaling enabled via MACBOOK_XFCE_FRACTIONAL_SCALE=1."
+            configure_xfce_fractional_hidpi_power
+        else
+            configure_xfce_hidpi_power
+        fi
     fi
 fi
 

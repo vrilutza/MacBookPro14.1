@@ -571,9 +571,11 @@ Applied automatically — no extra tools needed. All settings are persistent acr
 | **ulimits** (nofile=65536) | `/etc/security/limits.d/60-macbook-dev.conf` | Node.js / Docker / JVM open many file descriptors |
 | **i915 FBC + PSR** | `/etc/modprobe.d/i915-macbook.conf` | Saves 1-2W GPU power → cooler, longer battery |
 | **HiDPI 2× scaling** | gsettings (GNOME) / xfconf-query (Xfce) | 2560×1600 Retina display — without this text is microscopic |
-| **Fractional scaling** | gsettings mutter (GNOME/Wayland only) | Enables 150%/175% options in GNOME Display Settings; Xfce/X11 fractional xrandr scaling is disabled by default to avoid blurriness |
+| **Fractional scaling** | gsettings mutter (GNOME/Wayland only); `MACBOOK_XFCE_FRACTIONAL_SCALE=1` for Xfce/X11 | Enables 150%/175% options in GNOME Display Settings; Xfce/X11 fractional xrandr scaling is optional and may be slightly blurry |
 | **Power settings** | gsettings (GNOME) / xfconf-query (Xfce) | Power button=suspend, lid=suspend, AC=never-sleep, screen-blank=5min |
 | **intel-microcode** | apt package | CPU security patches + errata fixes for i5-7360U (Kaby Lake) |
+
+**Xfce fractional scaling:** Run `MACBOOK_XFCE_FRACTIONAL_SCALE=1 sudo bash macbook_hardware_fixer.sh` to enable 1.75× scaling on Xfce/X11. This uses an xrandr autostart script plus DPI 170 so the Retina display offers more usable space than the default 2× mode.
 | **fstrim.timer** | systemd timer | Weekly NVMe TRIM — sustained write speed + SSD longevity |
 | **journald limit** | `/etc/systemd/journald.conf.d/` | Caps logs at 1GB / 2 weeks — prevents disk fill during dev |
 | **coredump limit** | `/etc/systemd/coredump.conf.d/` | 512MB cap per dump — JVM/Chromium crashes won't fill NVMe |

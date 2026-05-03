@@ -139,6 +139,7 @@ run "Xfce scale"        "cat $REAL_HOME/.config/xfce4/xfconf/xfce-perchannel-xml
 run_user "Xfce WindowScalingFactor" xfconf-query -c xsettings -p /Gdk/WindowScalingFactor
 run_user "Xfce Xft DPI"           xfconf-query -c xsettings -p /Xft/DPI
 run "Xfce autostart scale" "cat $REAL_HOME/.config/autostart/macbook-xrandr-scale.desktop 2>/dev/null || echo 'none'"
+run "Xfce xrandr script"      "cat /usr/local/bin/macbook-xrandr-scale.sh 2>/dev/null || echo 'none'"
 
 # ── Battery / Thermal / Power ────────────────────────────────────────────────
 section "POWER — RAPL + TLP + Fan"

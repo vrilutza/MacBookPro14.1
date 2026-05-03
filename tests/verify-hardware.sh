@@ -628,7 +628,7 @@ if [ -n "${SUDO_USER:-}" ]; then
 
         USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
         if [ -n "$USER_HOME" ] && [ -f "$USER_HOME/.config/autostart/macbook-xrandr-scale.desktop" ]; then
-            warn "Legacy Xfce fractional scaling autostart exists — remove $USER_HOME/.config/autostart/macbook-xrandr-scale.desktop"
+            pass "Xfce fractional scaling autostart present"
         fi
     fi
 else
