@@ -895,17 +895,55 @@ if [ -n "$REAL_USER" ]; then
 
     log_ok "Touchpad: tap-to-click, natural scroll, two-finger scroll enabled (GNOME)."
 
-    # --- HiDPI: 2× scaling for MacBook Pro 2560×1600 Retina display ---
-    # Without this, UI elements are 1× (microscopic at native resolution).
-    # text-scaling-factor=1.0 keeps text crisp at 2× — don't set higher.
+    # --- HiDPI: 1.75× fractional scaling for MacBook Pro 2560×1600 Retina display ---
+    # Targets ~1463×914 effective (closest to macOS "Looks like 1440×900" / "More Space").
+    # scaling-factor=2 remains as Xwayland/legacy fallback (apps that ignore fractional).
+    # text-scaling-factor=1.0 — fonts are already correct at 1.75× compositor scale.
     run_as_user gsettings set org.gnome.desktop.interface scaling-factor 2
     run_as_user gsettings set org.gnome.desktop.interface text-scaling-factor 1.0
 
-    # Wayland fractional scaling (allows 150%, 175% in GNOME Display Settings)
-    # Needs experimental flag — harmless to set, GNOME ignores it if unsupported
+    # Enable fractional scaling compositor feature (required for 1.75× to work).
     run_as_user gsettings set org.gnome.mutter experimental-features \
         "['scale-monitor-framebuffer', 'xwayland-native-scaling']"
-    log_ok "HiDPI: 2× scaling set (2560×1600 Retina). Fractional scaling unlocked in Display Settings."
+
+    # Write monitors.xml so GNOME Wayland applies 1.75× scale automatically on first boot.
+    # GNOME reads this at session start; if EDID matches, 1.75× overrides the 2× fallback.
+    # MacBook Pro 14,1 internal display: connector=eDP-1, vendor=APP, product=Color LCD.
+    if [ -n "$REAL_HOME" ]; then
+        MONITORS_XML="$REAL_HOME/.config/monitors.xml"
+        mkdir -p "$(dirname "$MONITORS_XML")"
+        # Only write if user has not already customised display settings.
+        if [ ! -f "$MONITORS_XML" ]; then
+            cat > "$MONITORS_XML" << 'MONEOF'
+<monitors version="2">
+  <configuration>
+    <logicalmonitor>
+      <x>0</x>
+      <y>0</y>
+      <scale>1.75</scale>
+      <primary>yes</primary>
+      <monitor>
+        <monitorspec>
+          <connector>eDP-1</connector>
+          <vendor>APP</vendor>
+          <product>Color LCD</product>
+          <serial>0x00000000</serial>
+        </monitorspec>
+        <mode>
+          <width>2560</width>
+          <height>1600</height>
+          <rate>60.000</rate>
+        </mode>
+      </monitor>
+    </logicalmonitor>
+  </configuration>
+</monitors>
+MONEOF
+            chown "$REAL_USER:$REAL_USER" "$MONITORS_XML"
+        fi
+    fi
+    log_ok "HiDPI: 1.75× fractional scale set (~1440×900 effective, like macOS 'More Space')."
+    log_info "To change: Settings → Displays → Scale (125% / 150% / 175% / 200% available)."
 
     # --- GNOME Power settings ---
     # Power button: suspend instead of opening shutdown dialog
