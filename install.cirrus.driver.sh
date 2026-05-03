@@ -123,8 +123,10 @@ if [ ! -e /usr/src/linux-source-$kernel_version.tar.bz2 ]; then
     echo "Ubuntu kernel source not found: /usr/src/linux-source-$kernel_version.tar.bz2"
     echo "Attempting to download linux-source-$kernel_version via apt-get download..."
 
-    local_tmp_deb="$cur_dir/$build_dir/tmp-deb"
-    mkdir -p "$local_tmp_deb"
+    # Use /tmp so that _apt sandbox user can read the downloaded .deb.
+    # apt-get download fails with "Permission denied" when the target directory
+    # lives under a home dir that _apt cannot access (APT sandbox, Ubuntu 20.04+).
+    local_tmp_deb=$(mktemp -d /tmp/macbook-src-XXXXXX)
     pushd "$local_tmp_deb" > /dev/null
 
     set +e
@@ -133,6 +135,7 @@ if [ ! -e /usr/src/linux-source-$kernel_version.tar.bz2 ]; then
         echo "Error: Failed to download linux-source-$kernel_version."
         echo "Install manually with: sudo apt install linux-source-$kernel_version"
         popd > /dev/null
+        rm -rf "$local_tmp_deb"
         exit 1
     fi
     set -e

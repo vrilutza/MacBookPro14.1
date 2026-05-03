@@ -7,7 +7,7 @@
 #   sudo bash macbook_hardware_fixer.sh
 #
 # Hardware covered (0-11, 12 steps total):
-#    0. Cirrus Logic CS8409        — HDA audio + EasyEffects mic preset
+#    0. Cirrus Logic CS8409        — HDA audio kernel driver
 #    1. Intel Iris Plus 640 GPU    — VA-API hardware acceleration
 #    2. Bluetooth BCM4350C0 UART   — firmware (from firmware/) + bluez config
 #    3. WiFi Broadcom BCM4350      — macOS NVRAM + power save optimizations
@@ -15,11 +15,10 @@
 #    5. Thunderbolt 3 Alpine Ridge — bolt authorization daemon
 #    6. Battery & Thermal          — TLP + thermald + RAPL PL1/PL2 + time windows
 #    7. applesmc: Fan + Sensors + Keyboard Backlight
-#    8. Touchpad & Keyboard        — libinput + PalmDetection + natural scroll
+#    8. Touchpad & Keyboard        — libinput + PalmDetection + GNOME/Xfce HiDPI + power
 #    9. Screen Brightness + Suspend — s2idle + NVMe d3cold + auto-boot EFI fix
 #   10. System & Dev optimizations — ZRAM, sysctl, BBR, earlyoom, ulimits
 #   11. Display color calibration  — Apple factory ICC profile + colord autostart
-#   12. Night Shift → redshift     — 6500K day / 4000K night (macOS Night Shift port)
 # =============================================================================
 
 set -euo pipefail
@@ -65,7 +64,7 @@ echo -e "${NC}"
 # install.cirrus.driver.sh handles: kernel detection, source download, patching,
 # compilation, and installation into /lib/modules/$(uname -r)/updates/.
 # =============================================================================
-log_step "0/12 — Cirrus Logic CS8409 — HDA audio kernel driver + mic preset"
+log_step "0/11 — Cirrus Logic CS8409 — HDA audio kernel driver"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CIRRUS_INSTALLER="$SCRIPT_DIR/install.cirrus.driver.sh"
@@ -81,53 +80,10 @@ else
     log_info "Clone the full repo to get audio driver support: git clone <repo-url>"
 fi
 
-# --- EasyEffects: mic amplification + noise gate preset ---
-# macOS applies DSP on the internal mic (BeamFormer + noise gate) via CoreAudio.
-# Without processing the Linux mic level is too low and picks up fan/keyboard noise.
-# EasyEffects applies equivalent processing: noise gate at -26 dB + autogain to -18 dBFS.
-apt-get install -y --no-install-recommends easyeffects 2>/dev/null || \
-    apt-get install -y --no-install-recommends pulseeffects 2>/dev/null || true
-
-if [ -n "$REAL_HOME" ]; then
-    EE_PRESET_DIR="$REAL_HOME/.local/share/easyeffects/input"
-    mkdir -p "$EE_PRESET_DIR"
-    cat > "$EE_PRESET_DIR/macbook-mic.json" << 'EOF'
-{
-    "input": {
-        "blocklist": [],
-        "plugins_order": ["gate#0", "autogain#0"],
-        "gate#0": {
-            "bypass": false,
-            "input-gain": 0.0,
-            "output-gain": 0.0,
-            "attack": 20.0,
-            "release": 250.0,
-            "threshold": -26.0,
-            "ratio": 10.0,
-            "knee": 2.0,
-            "range": -12.0,
-            "makeup": 0.0,
-            "detection": "RMS",
-            "stereo-link": "Average"
-        },
-        "autogain#0": {
-            "bypass": false,
-            "target": -18.0,
-            "silence-threshold": -70.0,
-            "maximum-history": 5
-        }
-    }
-}
-EOF
-    chown -R "$REAL_USER:$REAL_USER" "$EE_PRESET_DIR"
-    log_ok "EasyEffects mic preset installed: noise gate + autogain (macOS mic DSP equivalent)."
-    log_info "Open EasyEffects → Input → load 'macbook-mic' preset to activate."
-fi
-
 # =============================================================================
 # STEP 1: System update + Intel GPU VA-API acceleration
 # =============================================================================
-log_step "1/12 — Intel Iris Plus 640 GPU — VA-API acceleration"
+log_step "1/11 — Intel Iris Plus 640 GPU — VA-API acceleration"
 
 apt-get update -qq
 
@@ -162,7 +118,7 @@ log_ok "i915: FBC + PSR enabled (saves 1-2W GPU power draw)."
 # =============================================================================
 # STEP 2: Bluetooth BCM4350C0 — firmware fix + bluez config
 # =============================================================================
-log_step "2/12 — Bluetooth BCM4350C0 UART — firmware fix"
+log_step "2/11 — Bluetooth BCM4350C0 UART — firmware fix"
 
 # --- 2a-pre. Remove wrong blacklists from /etc/modprobe.d/ ---
 # Common bad internet advice: "blacklist hci_uart" or "blacklist btusb"
@@ -390,7 +346,7 @@ log_info "═══════════════════════�
 # =============================================================================
 # STEP 3: WiFi Broadcom BCM4350 — power save + optimization
 # =============================================================================
-log_step "3/12 — WiFi BCM4350 — power save + regulatory"
+log_step "3/11 — WiFi BCM4350 — power save + regulatory"
 
 apt-get install -y --no-install-recommends wireless-regdb iw
 
@@ -467,7 +423,7 @@ log_info "If channels are limited, set country: sudo iw reg set RO  (or your cou
 # =============================================================================
 # STEP 4: FaceTime HD Camera (Broadcom 720p PCIe — 14e4:1570)
 # =============================================================================
-log_step "4/12 — FaceTime HD Camera — Broadcom PCIe driver (facetimehd)"
+log_step "4/11 — FaceTime HD Camera — Broadcom PCIe driver (facetimehd)"
 
 PKGS_BUILD=(git curl xz-utils cpio build-essential kmod libssl-dev)
 apt-get install -y --no-install-recommends "${PKGS_BUILD[@]}" linux-headers-"$KERNEL"
@@ -528,19 +484,19 @@ rm -rf "$WEBCAM_DIR"
 # =============================================================================
 # STEP 5: Thunderbolt 3 (Intel Alpine Ridge 4C) — bolt daemon
 # =============================================================================
-log_step "5/12 — Thunderbolt 3 — bolt authorization daemon"
+log_step "5/11 — Thunderbolt 3 — bolt authorization daemon"
 
 apt-get install -y --no-install-recommends bolt
 # bolt uses D-Bus activation — start manually here for the current session
 systemctl start bolt 2>/dev/null || true
 log_ok "bolt installed (activates automatically via D-Bus when TB3 device connects)."
 log_info "Authorize a device: boltctl enroll <device-uuid>"
-log_info "Or use GNOME Settings → Privacy → Thunderbolt."
+log_info "Or use Settings → Privacy → Thunderbolt (GNOME) / Settings Manager (Xfce)."
 
 # =============================================================================
 # STEP 6: Battery & Thermal management
 # =============================================================================
-log_step "6/12 — Battery & Thermal — TLP + thermald"
+log_step "6/11 — Battery & Thermal — TLP + thermald"
 
 if dpkg -l power-profiles-daemon &>/dev/null 2>&1; then
     log_warn "Removing power-profiles-daemon (conflicts with TLP)..."
@@ -691,7 +647,7 @@ log_info "Run 'sudo powertop' to see per-process power usage."
 # =============================================================================
 # STEP 7: applesmc — Fan control, temperature sensors, keyboard backlight
 # =============================================================================
-log_step "7/12 — applesmc: Fan / Temperature Sensors / Keyboard Backlight"
+log_step "7/11 — applesmc: Fan / Temperature Sensors / Keyboard Backlight"
 
 apt-get install -y --no-install-recommends lm-sensors
 
@@ -823,7 +779,7 @@ fi
 # =============================================================================
 # STEP 8: Touchpad & Keyboard — libinput natural scroll + tap-to-click
 # =============================================================================
-log_step "8/12 — Touchpad & Keyboard — libinput configuration"
+log_step "8/11 — Touchpad & Keyboard — libinput + GNOME/Xfce HiDPI + power"
 
 apt-get install -y --no-install-recommends libinput-tools
 
@@ -882,6 +838,35 @@ if [ -n "$REAL_USER" ]; then
     run_as_user gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type nothing
 
     log_ok "GNOME power: button=suspend, lid=suspend, screen-blank=5min, AC=never-sleep."
+
+    # --- Xfce 4.20 (Xubuntu): HiDPI + power via xfconf-query ---
+    # xfconf-query is the Xfce settings backend (equivalent of gsettings for GNOME).
+    # Silently skipped on non-Xfce systems (command not found → || true in run_as_user).
+    # xfconf_set: tries to update existing property first; creates it if absent.
+    xfconf_set() {
+        local ch="$1" prop="$2" type="$3" val="$4"
+        run_as_user xfconf-query -c "$ch" -p "$prop" -s "$val" 2>/dev/null || \
+        sudo -u "$REAL_USER" DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
+            xfconf-query -c "$ch" -p "$prop" -n -t "$type" -s "$val" 2>/dev/null || true
+    }
+
+    if command -v xfconf-query &>/dev/null; then
+        # HiDPI: WindowScalingFactor=2 makes GTK apps render at 2× on Retina.
+        # Xft/DPI=192 (96×2) ensures fonts scale correctly across all toolkits.
+        xfconf_set xsettings /Gdk/WindowScalingFactor int 2
+        xfconf_set xsettings /Xft/DPI               int 192
+        log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 Retina)."
+
+        # Power: lid-action 1=suspend, power-button 1=suspend.
+        # blank-on-battery=5 (min), inactivity-on-battery=20 (min), AC idle=0 (never sleep).
+        xfconf_set xfce4-power-manager /xfce4-power-manager/lid-action-on-battery    uint 1
+        xfconf_set xfce4-power-manager /xfce4-power-manager/lid-action-on-ac         uint 1
+        xfconf_set xfce4-power-manager /xfce4-power-manager/power-button-action      uint 1
+        xfconf_set xfce4-power-manager /xfce4-power-manager/blank-on-battery         uint 5
+        xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-battery    uint 20
+        xfconf_set xfce4-power-manager /xfce4-power-manager/inactivity-on-ac         uint 0
+        log_ok "Xfce 4.20 power: lid=suspend, button=suspend, blank=5min on battery, AC=never-sleep."
+    fi
 fi
 
 # --- X11 fallback: libinput config for Xorg sessions ---
@@ -929,7 +914,7 @@ fi
 # =============================================================================
 # STEP 9: Screen Brightness + Suspend/Sleep fix
 # =============================================================================
-log_step "9/12 — Screen Brightness + Suspend/Sleep"
+log_step "9/11 — Screen Brightness + Suspend/Sleep"
 
 # --- Brightness ---
 apt-get install -y --no-install-recommends brightnessctl
@@ -1057,7 +1042,7 @@ fstrim -v / 2>/dev/null | grep -v "^$" | while read line; do log_info "$line"; d
 # =============================================================================
 # STEP 10: Development & System optimizations
 # =============================================================================
-log_step "10/12 — System & Development optimizations"
+log_step "10/11 — System & Development optimizations"
 
 # --- 10a. ZRAM — compressed swap in RAM ---
 # Replaces slow disk swap with compressed RAM swap (2x ratio, lz4 algorithm).
@@ -1191,7 +1176,7 @@ cat > /etc/default/earlyoom << 'EOF'
 # earlyoom — early OOM killer for MacBook Pro development workloads
 # Kill at: 10% free RAM and 5% free swap
 # Avoids full system freeze during cargo/webpack/docker builds
-EARLYOOM_ARGS="-m 10 -s 5 --prefer '(cc1|rustc|node|java|python)' --avoid '(sshd|bash|gnome)' -r 60"
+EARLYOOM_ARGS="-m 10 -s 5 --prefer '(cc1|rustc|node|java|python)' --avoid '(sshd|bash|gnome|xfwm4|xfce4-session)' -r 60"
 EOF
 systemctl enable --now earlyoom
 log_ok "earlyoom installed: kills hungry processes at 10% free RAM (prevents freeze during builds)."
@@ -1298,7 +1283,7 @@ log_info "  git       — fsmonitor + untrackedCache + fetch.parallel=4"
 #   colormgr get-profiles       — should list Color-LCD-MacBookPro14-1
 #   colormgr device-get-default-profile <device-id>   — confirms assignment
 # =============================================================================
-log_step "11/12 — Display color calibration — Apple factory ICC profile"
+log_step "11/11 — Display color calibration — Apple factory ICC profile"
 
 apt-get install -y --no-install-recommends colord
 
@@ -1420,103 +1405,8 @@ DTEOF
     log_info "Verify after reboot:"
     log_info "  colormgr get-devices          — find your display's Device ID"
     log_info "  colormgr get-profiles         — confirm Color-LCD-MacBookPro14-1 is listed"
-    log_info "  GNOME Settings → Color        — profile visible and assigned"
+    log_info "  Settings → Color (GNOME) / Color Profiles (Xfce) — profile visible and assigned"
     log_info "Without this profile: oversaturated colors, incorrect white point (generic sRGB)."
-fi
-
-# =============================================================================
-# STEP 12: Night Shift → redshift (6500K day / 4000K night)
-# =============================================================================
-# macOS Ventura Night Shift: 6500K (D65) during the day, 4000K in the evening.
-# redshift replicates this on Linux using RandR/Wayland to adjust display colour
-# temperature gradually, reducing blue light in the evening.
-#
-# Config is placed system-wide at /etc/xdg/redshift.conf so it works for any
-# user without per-user setup. The user can override with ~/.config/redshift.conf.
-# Autostart entry created for the sudo-invoking user.
-# =============================================================================
-log_step "12/12 — Night Shift → redshift (colour temperature)"
-
-apt-get install -y --no-install-recommends redshift-gtk 2>/dev/null || \
-    apt-get install -y --no-install-recommends redshift 2>/dev/null || true
-
-if command -v redshift &>/dev/null || command -v redshift-gtk &>/dev/null; then
-    # Detect which DRM card belongs to the Intel GPU (vendor 0x8086).
-    # On kernel >= 5.14 with simpledrm, the EFI framebuffer takes card0 at boot
-    # and the real i915 driver gets card1. simpledrm's card0 is released once i915
-    # takes over, so only card1 remains. On older kernels (no simpledrm) card0 is Intel.
-    INTEL_CARD_NUM=0  # safe default
-    for _card in /sys/class/drm/card[0-9]*; do
-        [[ -d "$_card" ]] || continue
-        _num="${_card##*/card}"
-        [[ "$_num" =~ ^[0-9]+$ ]] || continue
-        _vendor=$(cat "$_card/device/vendor" 2>/dev/null)
-        if [[ "$_vendor" == "0x8086" ]]; then
-            INTEL_CARD_NUM=$_num
-            break
-        fi
-    done
-    log_info "redshift DRM: Intel GPU detected at /dev/dri/card${INTEL_CARD_NUM}"
-
-    # System-wide config — latitude/longitude set to Bucharest (Romania).
-    # User can edit /etc/xdg/redshift.conf or create ~/.config/redshift.conf to override.
-    cat > /etc/xdg/redshift.conf << EOF
-; MacBook Pro Night Shift equivalent — matches macOS Ventura defaults
-; Extracted from: macOS Night Shift = 4000K warm, D65 = 6500K neutral
-[redshift]
-temp-day=6500
-temp-night=4000
-gamma=1.0
-fade=1
-adjustment-method=drm
-location-provider=manual
-
-[manual]
-; Edit these coordinates for your location.
-; Default: Bucharest, Romania (lat=44.4, lon=26.1)
-lat=44.4
-lon=26.1
-
-[drm]
-; Intel GPU card number detected at install time: card${INTEL_CARD_NUM}
-; On kernel >= 5.14 simpledrm takes card0 first; i915 gets card1.
-; Without this, redshift fails with "Failed to open DRM device: /dev/dri/card0".
-card=${INTEL_CARD_NUM}
-EOF
-    log_ok "redshift config: 6500K day, 4000K night (matches macOS Night Shift defaults)."
-    log_info "Edit /etc/xdg/redshift.conf to change your latitude/longitude."
-
-    # Also write per-user config — on GNOME/Wayland, XDG_CONFIG_DIRS may not
-    # include /etc/xdg at session startup, so the system-wide file is skipped.
-    # ~/.config/redshift.conf is always read by redshift/redshift-gtk.
-    if [ -n "$REAL_HOME" ]; then
-        mkdir -p "$REAL_HOME/.config"
-        cp /etc/xdg/redshift.conf "$REAL_HOME/.config/redshift.conf"
-        chown "$REAL_USER:$REAL_USER" "$REAL_HOME/.config/redshift.conf"
-    fi
-
-    # Autostart for the desktop user
-    if [ -n "$REAL_HOME" ]; then
-        AUTOSTART_DIR="$REAL_HOME/.config/autostart"
-        mkdir -p "$AUTOSTART_DIR"
-        # Use redshift-gtk if available (has tray icon), fall back to redshift
-        REDSHIFT_BIN=$(command -v redshift-gtk 2>/dev/null || command -v redshift)
-        cat > "$AUTOSTART_DIR/redshift.desktop" << EOF
-[Desktop Entry]
-Type=Application
-Name=Night Shift (redshift)
-Comment=Adjust colour temperature at night — macOS Night Shift equivalent
-Exec=$REDSHIFT_BIN
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-EOF
-        chown "$REAL_USER:$REAL_USER" "$AUTOSTART_DIR/redshift.desktop"
-        log_ok "redshift autostart enabled for '$REAL_USER'."
-    fi
-else
-    log_warn "redshift not available in apt — skipping Night Shift equivalent."
-    log_info "Install manually: sudo apt-get install redshift-gtk"
 fi
 
 # =============================================================================
@@ -1542,11 +1432,6 @@ if lsmod 2>/dev/null | grep -q "snd_hda_codec_cs8409"; then
 else
     echo -e "  ${YELLOW}[!]${NC}  0. Audio — Cirrus CS8409 driver installed, active after reboot"
 fi
-if command -v easyeffects &>/dev/null || command -v pulseeffects &>/dev/null; then
-    echo -e "  ${GREEN}[✔]${NC}     Mic DSP — EasyEffects preset installed (noise gate + autogain)"
-else
-    echo -e "  ${YELLOW}[!]${NC}     Mic DSP — EasyEffects not installed (mic level will be low)"
-fi
 echo -e "  ${GREEN}[✔]${NC}  1. Intel GPU — VA-API hardware acceleration"
 if [ -f /lib/firmware/brcm/BCM4350C0.hcd ]; then
     echo -e "  ${GREEN}[✔]${NC}  2. Bluetooth — config fixed + firmware installed (BCM4350C0.hcd)"
@@ -1565,11 +1450,6 @@ if [ -f "$SCRIPT_DIR/firmware/display/Color-LCD-MacBookPro14-1.icc" ]; then
     echo -e "  ${GREEN}[✔]${NC} 11. Display color calibration — Apple ICC profile installed + autostart"
 else
     echo -e "  ${YELLOW}[!]${NC} 11. Display color calibration — ICC file missing (firmware/display/)"
-fi
-if command -v redshift &>/dev/null || command -v redshift-gtk &>/dev/null; then
-    echo -e "  ${GREEN}[✔]${NC} 12. Night Shift → redshift (6500K day / 4000K night)"
-else
-    echo -e "  ${YELLOW}[!]${NC} 12. redshift not installed — install: apt-get install redshift-gtk"
 fi
 echo ""
 echo -e "  ${YELLOW}[!]${NC} ${BOLD}REBOOT required for all changes to take effect.${NC}"

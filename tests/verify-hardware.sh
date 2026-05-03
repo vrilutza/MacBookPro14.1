@@ -3,9 +3,9 @@
 # =============================================================================
 # MacBook Pro Hardware Verifier
 # Checks that macbook_hardware_fixer.sh was applied correctly.
-# Covers all 12 steps (0-12): Audio/CS8409, GPU, Bluetooth, WiFi, Camera,
+# Covers all 12 steps (0-11): Audio/CS8409, GPU, Bluetooth, WiFi, Camera,
 # Thunderbolt, Battery/Thermal, applesmc, Touchpad/Keyboard, Brightness/Suspend,
-# System optimizations, Display ICC, Night Shift/redshift.
+# System optimizations, Display ICC.
 #
 # Usage: ./verify-hardware.sh [--help] [--root-only]
 # No root required for most checks; run as root for full Bluetooth config check.
@@ -36,22 +36,21 @@ if [[ "${1}" == "-h" || "${1}" == "--help" ]]; then
 Usage: $0 [--help]
 
 Verifies that macbook_hardware_fixer.sh was correctly applied on this system.
-Checks all 12 hardware steps (0-12).
+Checks all 12 hardware steps (0-11).
 
 Steps verified:
-  [0/12]  Cirrus CS8409 Audio     — .ko module file + lsmod + EasyEffects
-  [1/12]  Intel Iris Plus 640     — VA-API packages + i915 driver
-  [2/12]  Bluetooth BCM4350C0     — firmware, hci0 status, bluez config, WirePlumber
-  [3/12]  WiFi BCM4350            — brcmfmac module, power save config, NVRAM
-  [4/12]  FaceTime HD Camera      — facetimehd module + firmware + /dev/video device
-  [5/12]  Thunderbolt 3           — bolt service
-  [6/12]  Battery & Thermal       — TLP + thermald, RAPL PL1/PL2 + time windows
-  [7/12]  applesmc                — fan, temperature sensors, keyboard backlight
-  [8/12]  Touchpad & Keyboard     — libinput config + PalmDetection, hid_apple fnmode
-  [9/12]  Brightness + Suspend    — brightnessctl, s2idle GRUB, NVMe d3cold, EFI autoboot
-  [10/12] System optimizations    — ZRAM, BBR, NVMe scheduler, earlyoom
-  [11/12] Display ICC             — Apple factory color profile, colord assignment
-  [12/12] Night Shift → redshift  — redshift-gtk installed, config, autostart
+  [0/11]  Cirrus CS8409 Audio     — .ko module file + lsmod
+  [1/11]  Intel Iris Plus 640     — VA-API packages + i915 driver
+  [2/11]  Bluetooth BCM4350C0     — firmware, hci0 status, bluez config, WirePlumber
+  [3/11]  WiFi BCM4350            — brcmfmac module, power save config, NVRAM
+  [4/11]  FaceTime HD Camera      — facetimehd module + firmware + /dev/video device
+  [5/11]  Thunderbolt 3           — bolt service
+  [6/11]  Battery & Thermal       — TLP + thermald, RAPL PL1/PL2 + time windows
+  [7/11]  applesmc                — fan, temperature sensors, keyboard backlight
+  [8/11]  Touchpad & Keyboard     — libinput config + PalmDetection, hid_apple fnmode, HiDPI
+  [9/11]  Brightness + Suspend    — brightnessctl, s2idle GRUB, NVMe d3cold, EFI autoboot
+  [10/11] System optimizations    — ZRAM, BBR, NVMe scheduler, earlyoom
+  [11/11] Display ICC             — Apple factory color profile, colord assignment
 
 Exit codes:
   0 — all checks passed (warnings are informational only)
@@ -80,7 +79,7 @@ echo -e "${NC}"
 # =============================================================================
 # STEP 0 — Cirrus Logic CS8409 — HDA Audio Driver
 # =============================================================================
-step "0/12 — Cirrus Logic CS8409 — HDA audio driver"
+step "0/11 — Cirrus Logic CS8409 — HDA audio driver"
 
 KO_PATH=$(find /lib/modules/"$KERNEL"/updates -name "snd-hda-codec-cs8409.ko*" 2>/dev/null | head -1)
 if [ -n "$KO_PATH" ]; then
@@ -95,25 +94,11 @@ else
     warn "snd_hda_codec_cs8409 not loaded — may need reboot after first install"
 fi
 
-# EasyEffects mic preset (noise gate + autogain)
-# Installed per-user to ~/.local/share/easyeffects/input/macbook-mic.json
-if [ -n "${SUDO_USER:-}" ]; then
-    _EE_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-    _EE_PRESET="$_EE_HOME/.local/share/easyeffects/input/macbook-mic.json"
-    if [ -f "$_EE_PRESET" ]; then
-        pass "EasyEffects mic preset installed: $_EE_PRESET"
-    else
-        warn "EasyEffects mic preset not found: $_EE_PRESET"
-        info "Fix: run macbook_hardware_fixer.sh (step 0 installs the preset)"
-    fi
-else
-    info "EasyEffects preset check skipped (requires sudo to find user home)"
-fi
 
 # =============================================================================
 # STEP 1 — Intel Iris Plus 640 — VA-API
 # =============================================================================
-step "1/12 — Intel Iris Plus 640 GPU — VA-API"
+step "1/11 — Intel Iris Plus 640 GPU — VA-API"
 
 if dpkg -l intel-media-va-driver &>/dev/null 2>&1; then
     pass "intel-media-va-driver installed (Gen 9 / Kaby Lake VA-API)"
@@ -148,7 +133,7 @@ fi
 # =============================================================================
 # STEP 2 — Bluetooth BCM4350C0
 # =============================================================================
-step "2/12 — Bluetooth BCM4350C0 UART"
+step "2/11 — Bluetooth BCM4350C0 UART"
 
 BT_FW="/lib/firmware/brcm/BCM4350C0.hcd"
 BT_FW_OLD="/lib/firmware/brcm/BCM2E7C.hcd"
@@ -253,7 +238,7 @@ fi
 # =============================================================================
 # STEP 3 — WiFi BCM4350
 # =============================================================================
-step "3/12 — WiFi BCM4350 — brcmfmac"
+step "3/11 — WiFi BCM4350 — brcmfmac"
 
 if lsmod | grep -q "^brcmfmac "; then
     pass "brcmfmac module loaded"
@@ -319,7 +304,7 @@ fi
 # =============================================================================
 # STEP 4 — FaceTime HD Camera
 # =============================================================================
-step "4/12 — FaceTime HD Camera — facetimehd"
+step "4/11 — FaceTime HD Camera — facetimehd"
 
 if lsmod | grep -q "^facetimehd "; then
     pass "facetimehd kernel module loaded"
@@ -346,7 +331,7 @@ fi
 # =============================================================================
 # STEP 5 — Thunderbolt 3
 # =============================================================================
-step "5/12 — Thunderbolt 3 — bolt"
+step "5/11 — Thunderbolt 3 — bolt"
 
 if command -v boltctl &>/dev/null; then
     pass "bolt installed (boltctl available)"
@@ -363,7 +348,7 @@ fi
 # =============================================================================
 # STEP 6 — Battery & Thermal
 # =============================================================================
-step "6/12 — Battery & Thermal — TLP + thermald"
+step "6/11 — Battery & Thermal — TLP + thermald"
 
 if systemctl is-active tlp &>/dev/null 2>&1; then
     pass "TLP battery management service is active"
@@ -484,7 +469,7 @@ fi
 # =============================================================================
 # STEP 7 — applesmc: Fan, Sensors, Keyboard Backlight
 # =============================================================================
-step "7/12 — applesmc: Fan / Sensors / Keyboard Backlight"
+step "7/11 — applesmc: Fan / Sensors / Keyboard Backlight"
 
 if lsmod | grep -q "^applesmc "; then
     pass "applesmc kernel module loaded"
@@ -553,7 +538,7 @@ fi
 # =============================================================================
 # STEP 8 — Touchpad & Keyboard
 # =============================================================================
-step "8/12 — Touchpad & Keyboard — libinput"
+step "8/11 — Touchpad & Keyboard — libinput"
 
 LIBINPUT_CONF="/usr/share/X11/xorg.conf.d/40-macbook-libinput.conf"
 if [ -f "$LIBINPUT_CONF" ]; then
@@ -597,35 +582,58 @@ else
     info "hid_apple not loaded — expected: built-in keyboard uses applespi; hid_apple only needed for USB/BT Apple keyboards"
 fi
 
-# HiDPI scaling (GNOME, only checkable as the real user)
+# HiDPI + power checks — GNOME and Xfce 4.20
 if [ -n "${SUDO_USER:-}" ]; then
-    _SCALE=$(sudo -u "$SUDO_USER" gsettings get org.gnome.desktop.interface scaling-factor 2>/dev/null || echo "0")
+    _REAL_UID=$(id -u "$SUDO_USER" 2>/dev/null || echo 0)
+    _DBUS="unix:path=/run/user/${_REAL_UID}/bus"
+
+    # GNOME checks (silently skipped when gsettings schema is absent)
+    _SCALE=$(sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="$_DBUS" \
+        gsettings get org.gnome.desktop.interface scaling-factor 2>/dev/null || echo "0")
     if [ "$_SCALE" = "uint32 2" ]; then
-        pass "HiDPI: scaling-factor=2 set (2560×1600 Retina display correct)"
+        pass "HiDPI (GNOME): scaling-factor=2 set (2560×1600 Retina)"
     else
-        warn "HiDPI: scaling-factor=$_SCALE (expected 2 for MacBook Pro Retina)"
-        info "Fix: run macbook_hardware_fixer.sh (step 8 sets scaling-factor=2)"
+        # Only warn if we're actually on GNOME
+        if pgrep -u "$SUDO_USER" gnome-shell &>/dev/null; then
+            warn "HiDPI (GNOME): scaling-factor=$_SCALE (expected 2)"
+            info "Fix: run macbook_hardware_fixer.sh (step 8)"
+        fi
     fi
-    _PBUTTON=$(sudo -u "$SUDO_USER" gsettings get org.gnome.settings-daemon.plugins.power power-button-action 2>/dev/null || echo "?")
-    if [ "$_PBUTTON" = "'suspend'" ]; then
-        pass "GNOME power-button-action=suspend (not shutdown dialog)"
-    else
-        warn "GNOME power-button-action=$_PBUTTON (expected 'suspend')"
-    fi
-    _LID=$(sudo -u "$SUDO_USER" gsettings get org.gnome.settings-daemon.plugins.power lid-close-battery-action 2>/dev/null || echo "?")
-    if [ "$_LID" = "'suspend'" ]; then
-        pass "GNOME lid-close-battery-action=suspend"
-    else
-        warn "GNOME lid-close=battery=$_LID (expected 'suspend')"
+    _PBUTTON=$(sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="$_DBUS" \
+        gsettings get org.gnome.settings-daemon.plugins.power power-button-action 2>/dev/null || echo "?")
+    [ "$_PBUTTON" = "'suspend'" ] && pass "GNOME power-button-action=suspend" || \
+        { pgrep -u "$SUDO_USER" gnome-shell &>/dev/null && \
+          warn "GNOME power-button-action=$_PBUTTON (expected 'suspend')"; } 2>/dev/null || true
+    _LID=$(sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="$_DBUS" \
+        gsettings get org.gnome.settings-daemon.plugins.power lid-close-battery-action 2>/dev/null || echo "?")
+    [ "$_LID" = "'suspend'" ] && pass "GNOME lid-close-battery-action=suspend" || \
+        { pgrep -u "$SUDO_USER" gnome-shell &>/dev/null && \
+          warn "GNOME lid-close-battery=$_LID (expected 'suspend')"; } 2>/dev/null || true
+
+    # Xfce 4.20 checks (silently skipped when xfconf-query is absent)
+    if command -v xfconf-query &>/dev/null; then
+        _XSCALE=$(sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="$_DBUS" \
+            xfconf-query -c xsettings -p /Gdk/WindowScalingFactor 2>/dev/null || echo "0")
+        if [ "$_XSCALE" = "2" ]; then
+            pass "HiDPI (Xfce 4.20): WindowScalingFactor=2 set (Retina)"
+        else
+            warn "HiDPI (Xfce 4.20): WindowScalingFactor=$_XSCALE (expected 2)"
+            info "Fix: run macbook_hardware_fixer.sh (step 8 sets Xfce HiDPI)"
+        fi
+        _XLID=$(sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="$_DBUS" \
+            xfconf-query -c xfce4-power-manager \
+            -p /xfce4-power-manager/lid-action-on-battery 2>/dev/null || echo "?")
+        [ "$_XLID" = "1" ] && pass "Xfce power: lid-action-on-battery=1 (suspend)" || \
+            warn "Xfce power: lid-action-on-battery=$_XLID (expected 1=suspend)"
     fi
 else
-    info "HiDPI + GNOME power checks skipped (requires sudo — run: sudo $0)"
+    info "HiDPI + power checks skipped (requires sudo — run: sudo $0)"
 fi
 
 # =============================================================================
 # STEP 9 — Screen Brightness + Suspend/Sleep
 # =============================================================================
-step "9/12 — Screen Brightness + Suspend/Sleep"
+step "9/11 — Screen Brightness + Suspend/Sleep"
 
 if command -v brightnessctl &>/dev/null; then
     pass "brightnessctl installed"
@@ -692,7 +700,7 @@ fi
 # =============================================================================
 # STEP 10 — System & Development optimizations
 # =============================================================================
-step "10/12 — System & Development optimizations"
+step "10/11 — System & Development optimizations"
 
 # ZRAM
 if zramctl 2>/dev/null | grep -q "^/dev/zram"; then
@@ -840,7 +848,7 @@ fi
 # =============================================================================
 # STEP 11 — Display Color Calibration — Apple LCD ICC profile
 # =============================================================================
-step "11/12 — Display color calibration — Apple factory ICC profile"
+step "11/11 — Display color calibration — Apple factory ICC profile"
 
 ICC_SYSTEM="/usr/share/color/icc/macbook/Color-LCD-MacBookPro14-1.icc"
 ICC_NAME="Color-LCD-MacBookPro14-1"
@@ -892,66 +900,6 @@ if [ -x /usr/local/bin/macbook-color-profile.sh ]; then
 else
     fail "Color profile assignment script not found / not executable"
     info "Fix: run macbook_hardware_fixer.sh (step 11 installs this script)"
-fi
-
-# =============================================================================
-# STEP 12 — Night Shift → redshift (colour temperature)
-# =============================================================================
-step "12/12 — Night Shift → redshift (colour temperature)"
-
-if command -v redshift &>/dev/null || command -v redshift-gtk &>/dev/null; then
-    pass "redshift installed ($(command -v redshift-gtk 2>/dev/null || command -v redshift))"
-else
-    fail "redshift NOT installed — no colour temperature control (Night Shift equivalent)"
-    info "Fix: run macbook_hardware_fixer.sh (step 12 installs redshift-gtk)"
-fi
-
-REDSHIFT_CONF="/etc/xdg/redshift.conf"
-if [ -f "$REDSHIFT_CONF" ]; then
-    pass "redshift system config present: $REDSHIFT_CONF"
-    if grep -q "temp-day=6500" "$REDSHIFT_CONF" && grep -q "temp-night=4000" "$REDSHIFT_CONF"; then
-        pass "redshift colour temperatures: 6500K day / 4000K night"
-    else
-        warn "redshift temps not set to 6500K/4000K — check $REDSHIFT_CONF"
-    fi
-    # Detect the actual Intel GPU card number (same logic as macbook_hardware_fixer.sh)
-    _INTEL_CARD=""
-    for _card in /sys/class/drm/card[0-9]*; do
-        [[ -d "$_card" ]] || continue
-        _num="${_card##*/card}"
-        [[ "$_num" =~ ^[0-9]+$ ]] || continue
-        _vendor=$(cat "$_card/device/vendor" 2>/dev/null)
-        if [[ "$_vendor" == "0x8086" ]]; then
-            _INTEL_CARD=$_num
-            break
-        fi
-    done
-    RS_CARD=$(grep -oP '^card=\K[0-9]+' "$REDSHIFT_CONF" 2>/dev/null)
-    if [ -n "$RS_CARD" ] && [ "$RS_CARD" = "${_INTEL_CARD:-1}" ]; then
-        pass "redshift DRM card override: card=$RS_CARD (Intel GPU on MacBookPro14,1 is card${_INTEL_CARD:-?})"
-    elif [ -n "$RS_CARD" ]; then
-        warn "redshift DRM card=$RS_CARD but Intel GPU is card${_INTEL_CARD:-?} — may fail to start"
-        info "Fix: run macbook_hardware_fixer.sh (step 12 auto-detects the correct card)"
-    else
-        fail "redshift DRM card not set — will fail with 'Failed to open DRM device'"
-        info "Fix: run macbook_hardware_fixer.sh (step 12 writes [drm] card=N)"
-    fi
-else
-    warn "redshift system config not found: $REDSHIFT_CONF"
-    info "Fix: run macbook_hardware_fixer.sh (step 12 writes /etc/xdg/redshift.conf)"
-fi
-
-if [ -n "${SUDO_USER:-}" ]; then
-    REAL_HOME_RS=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-    RS_AUTOSTART="$REAL_HOME_RS/.config/autostart/redshift.desktop"
-    if [ -f "$RS_AUTOSTART" ]; then
-        pass "redshift autostart entry present: $RS_AUTOSTART"
-    else
-        warn "redshift autostart missing: $RS_AUTOSTART — won't start on login"
-        info "Fix: run macbook_hardware_fixer.sh (step 12 creates the autostart entry)"
-    fi
-else
-    info "redshift autostart check skipped (requires sudo)"
 fi
 
 # =============================================================================
