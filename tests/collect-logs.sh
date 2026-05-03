@@ -136,6 +136,9 @@ run "autostart files"   "ls -la $REAL_HOME/.config/autostart/ 2>/dev/null"
 run_user "GNOME scale"  gsettings get org.gnome.desktop.interface scaling-factor
 run_user "GNOME frac"   gsettings get org.gnome.mutter experimental-features
 run "Xfce scale"        "cat $REAL_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml 2>/dev/null"
+run_user "Xfce WindowScalingFactor" xfconf-query -c xsettings -p /Gdk/WindowScalingFactor
+run_user "Xfce Xft DPI"           xfconf-query -c xsettings -p /Xft/DPI
+run "Xfce autostart scale" "cat $REAL_HOME/.config/autostart/macbook-xrandr-scale.desktop 2>/dev/null || echo 'none'"
 
 # ── Battery / Thermal / Power ────────────────────────────────────────────────
 section "POWER — RAPL + TLP + Fan"

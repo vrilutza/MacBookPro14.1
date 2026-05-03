@@ -625,6 +625,11 @@ if [ -n "${SUDO_USER:-}" ]; then
             -p /xfce4-power-manager/lid-action-on-battery 2>/dev/null || echo "?")
         [ "$_XLID" = "1" ] && pass "Xfce power: lid-action-on-battery=1 (suspend)" || \
             warn "Xfce power: lid-action-on-battery=$_XLID (expected 1=suspend)"
+
+        USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+        if [ -n "$USER_HOME" ] && [ -f "$USER_HOME/.config/autostart/macbook-xrandr-scale.desktop" ]; then
+            warn "Legacy Xfce fractional scaling autostart exists — remove $USER_HOME/.config/autostart/macbook-xrandr-scale.desktop"
+        fi
     fi
 else
     info "HiDPI + power checks skipped (requires sudo — run: sudo $0)"

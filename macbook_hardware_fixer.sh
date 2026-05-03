@@ -37,6 +37,33 @@ log_warn() { echo -e "  ${YELLOW}[!]${NC} $1"; }
 log_err()  { echo -e "  ${RED}[✘]${NC} $1"; }
 log_info() { echo -e "  ${BLUE}[i]${NC} $1"; }
 
+get_user_dbus_addr() {
+    [ -z "$REAL_USER" ] && return 1
+    printf 'unix:path=/run/user/%s/bus' "$(id -u "$REAL_USER")"
+}
+
+run_as_user() {
+    local dbus
+    dbus=$(get_user_dbus_addr) || return 0
+    sudo -u "$REAL_USER" DBUS_SESSION_BUS_ADDRESS="$dbus" "$@" 2>/dev/null || true
+}
+
+xfconf_set() {
+    local ch="$1" prop="$2" type="$3" val="$4" dbus
+    dbus=$(get_user_dbus_addr) || return 0
+    sudo -u "$REAL_USER" DBUS_SESSION_BUS_ADDRESS="$dbus" \
+        xfconf-query -c "$ch" -p "$prop" -s "$val" 2>/dev/null || \
+    sudo -u "$REAL_USER" DBUS_SESSION_BUS_ADDRESS="$dbus" \
+        xfconf-query -c "$ch" -p "$prop" -n -t "$type" -s "$val" 2>/dev/null || true
+}
+
+cleanup_xfce_fractional_scaling() {
+    if [ -n "$REAL_HOME" ]; then
+        rm -f "$REAL_HOME/.config/autostart/macbook-xrandr-scale.desktop"
+        rm -f /usr/local/bin/macbook-xrandr-scale.sh
+    fi
+}
+
 # --- Root check ---
 if [ "$EUID" -ne 0 ]; then
     log_err "Please run as root: sudo ./macbook_hardware_fixer.sh"
@@ -970,14 +997,6 @@ MONEOF
     # --- Xfce 4.20 (Xubuntu): HiDPI + power via xfconf-query ---
     # xfconf-query is the Xfce settings backend (equivalent of gsettings for GNOME).
     # Silently skipped on non-Xfce systems (command not found → || true in run_as_user).
-    # xfconf_set: tries to update existing property first; creates it if absent.
-    xfconf_set() {
-        local ch="$1" prop="$2" type="$3" val="$4"
-        run_as_user xfconf-query -c "$ch" -p "$prop" -s "$val" 2>/dev/null || \
-        sudo -u "$REAL_USER" DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
-            xfconf-query -c "$ch" -p "$prop" -n -t "$type" -s "$val" 2>/dev/null || true
-    }
-
     if command -v xfconf-query &>/dev/null; then
         # HiDPI: WindowScalingFactor=2 makes GTK apps render at 2× on Retina.
         # Xft/DPI=192 (96×2) ensures fonts scale correctly across all toolkits.
@@ -1006,17 +1025,8 @@ XFEOF
                 chown "$REAL_USER:$REAL_USER" "$XSET_XML"
             fi
         fi
-        log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 → 1280×800 logical)."
 
-        # Fractional scaling to match macOS "More Space" (1440×900 effective).
-        # GTK renders at 2× (crisp), xrandr maps virtual 2880×1800 → physical 2560×1600.
-        # Gives 1440×900 logical resolution — more desktop space than 1280×800.
-        if [ -n "$REAL_HOME" ]; then
-            # Remove any legacy Xfce fractional xrandr autostart created by older versions.
-            rm -f "$REAL_HOME/.config/autostart/macbook-xrandr-scale.desktop"
-            rm -f /usr/local/bin/macbook-xrandr-scale.sh
-        fi
-
+        cleanup_xfce_fractional_scaling
         log_ok "HiDPI: Xfce 4.20 WindowScalingFactor=2 + Xft/DPI=192 set (2560×1600 → 1280×800 logical)."
         log_info "Fractional xrandr scaling is disabled by default on Xfce/X11 because it often looks blurry."
 
