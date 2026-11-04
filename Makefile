@@ -24,6 +24,7 @@ distclean: clean
 	rm -rf build/ dkms.conf.orig
 
 install:
+	rm -f $(KERNELDIR)/updates/codecs/cirrus/snd-hda-codec-cs8409.ko*
 	make INSTALL_MOD_DIR=updates -C $(KERNELBUILD) M=$(shell pwd)/build/hda CONFIG_MODULE_SIG_ALL=n modules_install
 	depmod -a
 

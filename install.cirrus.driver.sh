@@ -76,7 +76,9 @@ sed -i 's/^BUILT_MODULE_LOCATION\[0\].*$/BUILT_MODULE_LOCATION[0]="build\/hda\/c
 sed -i 's/^PRE_BUILD.*$/PRE_BUILD="install.cirrus.driver.sh -k $kernelver --dkms"/' dkms.conf
 
 find_cs8409_module() {
-    find /lib/modules/"$UNAME" -type f \( -name 'snd-hda-codec-cs8409.ko*' -o -name 'snd-hda-codec-cirrus.ko*' \) 2>/dev/null | sort | head -n1 || true
+    find /lib/modules/"$UNAME"/updates /lib/modules/"$UNAME"/extra \
+        -type f \( -name 'snd-hda-codec-cs8409.ko*' -o -name 'snd-hda-codec-cirrus.ko*' \) \
+        2>/dev/null | sort | head -n1 || true
 }
 
 ensure_cs8409_module_in_updates() {
@@ -85,12 +87,13 @@ ensure_cs8409_module_in_updates() {
     local preferred_dir="/lib/modules/${UNAME}/updates/codecs/cirrus"
 
     if [ -z "$module_path" ]; then
-        echo "Warning: CS8409 module not found under /lib/modules/$UNAME."
+        echo "Warning: Built CS8409 module not found under /lib/modules/$UNAME/updates."
         return 1
     fi
 
     mkdir -p "$preferred_dir"
     if [[ "$module_path" != "$preferred_dir/"* ]]; then
+        rm -f "$preferred_dir"/snd-hda-codec-cs8409.ko* "$preferred_dir"/snd-hda-codec-cirrus.ko*
         cp -a "$module_path" "$preferred_dir/"
         echo "Copied CS8409 driver from $module_path to $preferred_dir/"
     fi
@@ -103,7 +106,7 @@ if [[ $dkms_action == 'install' ]]; then
     # Remove any stale non-DKMS module files before DKMS install.
     update_dir="/lib/modules/${UNAME}/updates/codecs/cirrus"
     mkdir -p "$update_dir"
-    for file in "$update_dir"/snd-hda-codec-cs8409.ko "$update_dir"/snd-hda-codec-cirrus.ko; do
+    for file in "$update_dir"/snd-hda-codec-cs8409.ko* "$update_dir"/snd-hda-codec-cirrus.ko*; do
         if [ -e "$file" ]; then
             rm -f "$file"
             echo "removed $file"
@@ -153,52 +156,61 @@ fetch_hda_sparse() {
     [ -z "$codename" ] && return 1
     command -v git >/dev/null 2>&1 || return 1
 
-    local tmp_git
-    tmp_git=$(mktemp -d /tmp/macbook-kern-XXXXXX)
-    echo "Fetching kernel source: sparse clone of sound/hda/ (ubuntu/${codename})..."
-    if git clone --quiet --depth=1 --filter=blob:none --sparse \
-           "https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/${codename}" \
-           "$tmp_git" \
-    && git -C "$tmp_git" sparse-checkout set sound/hda; then
-        mkdir -p "$target"
-        cp -r "$tmp_git/sound/hda/." "$target/"
+    local repo_url="https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/${codename}"
+    local branch
+    for branch in master-next master; do
+        local tmp_git
+        tmp_git=$(mktemp -d /tmp/macbook-kern-XXXXXX)
+        echo "Fetching kernel source: sparse clone of sound/hda/ (ubuntu/${codename}, branch ${branch})..."
+        if git clone --quiet --depth=1 --branch "$branch" --filter=blob:none --sparse \
+               "$repo_url" "$tmp_git" 2>/dev/null \
+        && git -C "$tmp_git" sparse-checkout set sound/hda 2>/dev/null \
+        && [ -f "$tmp_git/sound/hda/common/Makefile" ] \
+        && [ -f "$tmp_git/sound/hda/codecs/cirrus/cs8409.c" ]; then
+            mkdir -p "$target"
+            cp -r "$tmp_git/sound/hda/." "$target/"
+            rm -rf "$tmp_git"
+            return 0
+        fi
         rm -rf "$tmp_git"
+    done
+    return 1
+}
+
+fetch_hda_deb() {
+    local target_build_dir="$1"
+    local local_tmp_deb
+    local_tmp_deb=$(mktemp -d /tmp/macbook-src-XXXXXX)
+    echo "Downloading linux-source-${kernel_version} package via apt..."
+    if (cd "$local_tmp_deb" && apt-get download "linux-source-${kernel_version}"); then
+        echo "Extracting kernel sound/hda source..."
+        dpkg-deb -x "$local_tmp_deb"/*.deb "$local_tmp_deb"
+        cp "$local_tmp_deb"/usr/src/linux-source-*/linux-source-*.tar.bz2 \
+            "/usr/src/linux-source-${kernel_version}.tar.bz2" 2>/dev/null || true
+        tar --strip-components=2 -xf "$local_tmp_deb"/usr/src/linux-source-*/linux-source-*.tar.bz2 \
+            --directory="$target_build_dir" "linux-source-${kernel_version}/sound/hda"
+        rm -rf "$local_tmp_deb"
         return 0
     fi
-    rm -rf "$tmp_git"
+    rm -rf "$local_tmp_deb"
     return 1
 }
 
 if [ -e /usr/src/linux-source-$kernel_version.tar.bz2 ]; then
-    echo "Extracting kernel sound/hda source..."
-    tar --strip-components=2 -xvf /usr/src/linux-source-$kernel_version.tar.bz2 \
+    echo "Extracting cached kernel sound/hda source..."
+    tar --strip-components=2 -xf /usr/src/linux-source-$kernel_version.tar.bz2 \
         --directory="$cur_dir/$build_dir" linux-source-$kernel_version/sound/hda
+
+elif fetch_hda_deb "$cur_dir/$build_dir"; then
+    echo "Kernel sound/hda source fetched via linux-source-${kernel_version} package."
 
 elif fetch_hda_sparse "$hda_dir"; then
     echo "Kernel sound/hda source fetched via sparse clone."
 
 else
-    echo "Sparse clone unavailable — downloading linux-source-${kernel_version} (~192MB)..."
-    local_tmp_deb=$(mktemp -d /tmp/macbook-src-XXXXXX)
-    pushd "$local_tmp_deb" > /dev/null
-    set +e
-    apt-get download linux-source-$kernel_version
-    if [[ $? -ne 0 ]]; then
-        echo "Error: Failed to download linux-source-$kernel_version."
-        echo "Install manually with: sudo apt install linux-source-$kernel_version"
-        popd > /dev/null
-        rm -rf "$local_tmp_deb"
-        exit 1
-    fi
-    set -e
-    echo "Extracting kernel sound/hda source..."
-    dpkg-deb -x *.deb .
-    cp usr/src/linux-source-*/linux-source-*.tar.bz2 \
-        /usr/src/linux-source-$kernel_version.tar.bz2 2>/dev/null || true
-    tar --strip-components=2 -xvf usr/src/linux-source-*/linux-source-*.tar.bz2 \
-        --directory="$cur_dir/$build_dir" linux-source-$kernel_version/sound/hda
-    popd > /dev/null
-    rm -rf "$local_tmp_deb"
+    echo "Error: Failed to fetch kernel sound/hda source for linux-source-${kernel_version}."
+    echo "Install manually with: sudo apt install linux-source-${kernel_version}"
+    exit 1
 fi
 
 # Replace upstream Makefiles with our custom ones
