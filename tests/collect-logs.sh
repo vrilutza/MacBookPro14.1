@@ -174,10 +174,12 @@ run "dmesg — camera"    "dmesg | grep -i -E 'facetime|fthd|14e4:1570' | head -
 
 # ── Touchpad / Keyboard ──────────────────────────────────────────────────────
 section "INPUT — touchpad + keyboard"
-run "Input devices"     "libinput list-devices 2>/dev/null | grep -E 'Device:|Capabilities:'"
-run "hid_apple fnmode"  "cat /sys/module/hid_apple/parameters/fnmode 2>/dev/null"
-run "hid-apple conf"    "cat /etc/modprobe.d/hid-apple-macbook.conf 2>/dev/null"
-run "libinput X11 conf" "cat /usr/share/X11/xorg.conf.d/40-macbook-libinput.conf 2>/dev/null"
+run "Input devices"        "libinput list-devices 2>/dev/null | grep -E 'Device:|Capabilities:'"
+run "hid_apple fnmode"     "cat /sys/module/hid_apple/parameters/fnmode 2>/dev/null"
+run "hid-apple conf"       "cat /etc/modprobe.d/hid-apple-macbook.conf 2>/dev/null"
+run "libinput quirks"      "cat /etc/libinput/local-overrides.quirks 2>/dev/null"
+run "libinput quirks list" "libinput quirks list /dev/input/by-path/*-event-kbd 2>/dev/null; libinput quirks list /dev/input/by-path/*-event-mouse 2>/dev/null"
+run "libinput X11 conf"    "cat /usr/share/X11/xorg.conf.d/40-macbook-libinput.conf 2>/dev/null"
 run "Kbd backlight"     "cat /sys/class/leds/spi::kbd_backlight/brightness 2>/dev/null; cat /sys/class/leds/spi::kbd_backlight/max_brightness 2>/dev/null"
 run_user "GNOME touchpad" gsettings get org.gnome.desktop.peripherals.touchpad tap-to-click
 

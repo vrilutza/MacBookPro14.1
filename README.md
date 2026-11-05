@@ -379,14 +379,17 @@ The script sets **maximum brightness** on every boot via `systemd-tmpfiles`
 
 **Script:** `macbook_hardware_fixer.sh` step 8
 
-Configured automatically for both Wayland (via `gsettings`) and X11 (via
+Configured automatically across both Wayland (via `/etc/libinput/local-overrides.quirks` + `gsettings`) and X11 (via
 `/usr/share/X11/xorg.conf.d/40-macbook-libinput.conf`):
 
+- **Hardware quirks (`/etc/libinput/local-overrides.quirks`)**:
+  - Tags `Apple SPI Keyboard` as internal (`AttrKeyboardIntegration=internal`), enabling native **Disable-While-Typing (DWT)** under Wayland and X11.
+  - Activates libinput palm edge zone rejection and tunes physical dimensions (`135x83` mm), touch size (`260:210`), and palm/thumb thresholds (`850` / `700`) to prevent accidental cursor jumps.
 - Tap-to-click
 - Natural scroll
 - Two-finger scroll
 - Clickfinger (1-finger = left, 2-finger = right, 3-finger = middle)
-- Disable-while-typing
+- Disable-while-typing (DWT)
 - **PalmDetection** — prevents cursor jumps when palms touch the trackpad while typing
 - **TappingButtonMap = lrm** — 1-finger tap = left, 2-finger = right, 3-finger = middle
 

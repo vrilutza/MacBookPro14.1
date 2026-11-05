@@ -1113,6 +1113,43 @@ if [ -n "$REAL_USER" ]; then
     fi
 fi
 
+# --- Hardware quirks for libinput (Wayland & X11) ---
+# MacBook Pro 14,1 built-in keyboard & touchpad (applespi driver)
+# 1. Apple SPI Keyboard registers with Vendor=0x0000, missing default MatchVendor=0x05AC rule.
+#    AttrKeyboardIntegration=internal is required for libinput tp_dwt_pair_keyboard() to enable
+#    Disable-While-Typing (DWT) under both Wayland and X11.
+# 2. Removing ModelAppleTouchpad enables libinput palm edge zone rejection.
+# 3. Size and thresholds tailored for the 135x83 mm trackpad to reject accidental palm/thumb taps.
+mkdir -p /etc/libinput
+cat > /etc/libinput/local-overrides.quirks << 'EOF'
+# MacBook Pro 14,1 (applespi) — libinput hardware quirks (Wayland & X11)
+
+[Apple Internal Keyboard (SPI) applespi driver]
+MatchUdevType=keyboard
+MatchBus=spi
+MatchName=Apple SPI Keyboard
+AttrKeyboardIntegration=internal
+
+[Apple Laptop Touchpad (SPI) applespi driver override]
+MatchUdevType=touchpad
+MatchBus=spi
+MatchVendor=0x06CB
+AttrSizeHint=135x83
+AttrTouchSizeRange=260:210
+AttrPalmSizeThreshold=850
+AttrThumbSizeThreshold=700
+EOF
+
+if command -v libinput &>/dev/null; then
+    if libinput quirks validate &>/dev/null; then
+        log_ok "libinput hardware quirks written and validated: DWT + palm rejection active."
+    else
+        log_warn "libinput quirks validation returned a warning — check /etc/libinput/local-overrides.quirks."
+    fi
+else
+    log_ok "libinput hardware quirks written to /etc/libinput/local-overrides.quirks."
+fi
+
 # --- X11 fallback: libinput config for Xorg sessions ---
 mkdir -p /usr/share/X11/xorg.conf.d
 cat > /usr/share/X11/xorg.conf.d/40-macbook-libinput.conf << 'EOF'
