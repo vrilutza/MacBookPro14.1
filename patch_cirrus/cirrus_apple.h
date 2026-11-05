@@ -1679,6 +1679,107 @@ static int cs_8409_apple_parse_auto_config(struct hda_codec *codec)
 }
 
 // BLOCK REMOVED: old kernel < 5.13 input control functions (no longer needed for kernel 7+)
+
+/* we still need some fixups with the new version
+   as it doesnt seem to setup the inputs correctly
+ */
+
+// the culprit function seems to be check_dyn_adc_switch in hda_generic.c
+// - it should reduce the adc_nids list down to the 2 connected input adcs - but it does not
+// - its current implementation appears to have a fundamental flaw
+// - it assumes adcs are in a non-null list that ends in null
+// but the 8409 has a random non-null element in an essentially null list
+
+
+static int cs_8409_apple_create_input_ctls(struct hda_codec *codec)
+{
+	struct hda_gen_spec *spec = codec->spec;
+	struct hda_input_mux *imux = &spec->input_mux;
+	int i, n, nums;
+
+	myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls\n");
+
+	// determine for which input items we have a non-zero adc
+	nums = 0;
+	for (i = 0; i < imux->num_items; i++) {
+		for (n = 0; n < spec->num_adc_nids; n++) {
+			if (spec->input_paths[i][n]) nums++;
+		}
+	}
+
+	// this code essentially taken from check_dyn_adc_switch
+	// reduce the adc_nids list to connected items
+	if (nums != spec->num_adc_nids) {
+		/* shrink the invalid adcs and input paths */
+		printk("snd_hda_intel: hda_generic_check_dyn_adc_switch shrinking\n");
+		nums = 0;
+		for (i = 0; i < imux->num_items; i++) {
+			for (n = 0; n < spec->num_adc_nids; n++) {
+				if (spec->input_paths[i][n]) {
+					struct nid_path *path = NULL;
+					spec->adc_nids[nums] = spec->adc_nids[n];
+					//invalidate_nid_path(codec, spec->input_paths[i][nums]);
+					// this is explicit coding of simple function invalidate_nid_path from hda_generic.c
+					path = snd_hda_get_path_from_idx(codec, spec->input_paths[i][nums]);
+					if (path)
+						memset(path, 0, sizeof(*path));
+					spec->input_paths[i][nums] = spec->input_paths[i][n];
+					spec->input_paths[i][n] = 0;
+					nums++;
+					// only store first non-zero path per adc
+					break;
+				}
+			}
+		}
+		spec->num_adc_nids = nums;
+	}
+
+	for (n = 0; n < spec->num_adc_nids; n++) {
+		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls adc nid 0x%02x\n", spec->adc_nids[n]);
+	}
+
+	myprintk("snd_hda_intel: end cs_8409_apple_create_input_ctls\n");
+
+	return 0;
+}
+
+static const struct hda_pintbl macbook_pro_pincfgs[] = {
+        { 0x45, 0x00800101 },
+        { }
+};
+static const struct hda_pintbl imac_pincfgs[] = {
+        { 0x44, 0x00800101 },
+        { }
+};
+
+static void cs_8409_cs42l83_unsolicited_response(struct hda_codec *codec, unsigned int res);
+
+static void cs_8409_cs42l83_callback(struct hda_codec *codec, struct hda_jack_callback *event)
+{
+        mycodec_info(codec, "cs_8409_cs42l83_callback %pF\n", cs_8409_cs42l83_callback);
+
+        cs_8409_cs42l83_unsol_event_handler(codec, event->unsol_res);
+
+        mycodec_info(codec, "cs_8409_cs42l83_callback end\n");
+}
+
+static void cs_8409_cs42l83_unsol_event_handler(struct hda_codec *codec, unsigned int unsol_res)
+{
+	mycodec_info(codec, "cs_8409_cs42l83_unsol_event_handler\n");
+
+	// print the stored unsol res which seems to be the GPIO pins state
+	mycodec_info(codec, "cs_8409_cs42l83_unsol_event_handler - event unsol_res 0x%08x\n", unsol_res);
+
+	cs_8409_cs42l83_unsolicited_response(codec, unsol_res);
+
+        mycodec_info(codec, "cs_8409_cs42l83_unsol_event_handler end\n");
+}
+
+static void cs_8409_automute(struct hda_codec *codec)
+{
+	dev_info(hda_codec_dev(codec), "cs_8409_automute called\n");
+}
+
 // for Apple we need multiple versions because so far macbook pro and imacs use different nids
 static int cs8409_cs42l83_macbook_exec_verb(struct hdac_device *dev, unsigned int cmd, unsigned int flags,
                                             unsigned int *res)
@@ -1844,6 +1945,12 @@ static struct cs8409_apple_spec *cs8409_apple_alloc_spec(struct hda_codec *codec
 	return spec;
 }
 
+
+static int cs_8409_boot_setup(struct hda_codec *codec);
+static void cs_8409_playback_pcm_hook(struct hda_pcm_stream *hinfo, struct hda_codec *codec,
+                                      struct snd_pcm_substream *substream, int action);
+static void cs_8409_capture_pcm_hook(struct hda_pcm_stream *hinfo, struct hda_codec *codec,
+                                     struct snd_pcm_substream *substream, int action);
 
 static int cs8409_apple(struct hda_codec *codec)
 {
@@ -2293,13 +2400,6 @@ static int cs8409_apple(struct hda_codec *codec)
 	// dell : /* Fix Sample Rate to 48kHz */
 	//spec->gen.stream_analog_playback = &cs42l83_apple_pcm_analog_playback;
 	//spec->gen.stream_analog_capture = &cs42l83_apple_pcm_analog_capture;
-
-
-static int cs_8409_boot_setup(struct hda_codec *codec);
-static void cs_8409_playback_pcm_hook(struct hda_pcm_stream *hinfo, struct hda_codec *codec,
-                                      struct snd_pcm_substream *substream, int action);
-static void cs_8409_capture_pcm_hook(struct hda_pcm_stream *hinfo, struct hda_codec *codec,
-                                     struct snd_pcm_substream *substream, int action);
 
 	spec->gen.pcm_playback_hook = cs_8409_playback_pcm_hook;
 

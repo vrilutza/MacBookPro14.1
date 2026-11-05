@@ -1,10 +1,13 @@
 #!/bin/bash
 
+set -euo pipefail
+
 src_dir='/usr/src/snd_hda_macbookpro-0.1'
 module_name='snd-hda-codec-cs8409'
 dkms_name='snd_hda_macbookpro/0.1'
 var_dkms_dir='/var/lib/dkms/snd_hda_macbookpro'
 cur_dir=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
+dkms_remove=false
 
 # specify uninstall with the -r or -u argument
 while getopts :ru arg
