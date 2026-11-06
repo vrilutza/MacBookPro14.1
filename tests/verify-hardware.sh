@@ -557,6 +557,31 @@ fi
 # =============================================================================
 step "8/11 — Touchpad & Keyboard — libinput"
 
+LIBINPUT_QUIRKS="/etc/libinput/local-overrides.quirks"
+if [ -f "$LIBINPUT_QUIRKS" ]; then
+    pass "libinput hardware quirks present: $LIBINPUT_QUIRKS"
+    if grep -q "AttrKeyboardIntegration=internal" "$LIBINPUT_QUIRKS"; then
+        pass "internal keyboard quirk configured (enables Wayland DWT pairing)"
+    else
+        warn "AttrKeyboardIntegration=internal missing from $LIBINPUT_QUIRKS — DWT may not pair"
+    fi
+    if grep -q "AttrPalmSizeThreshold" "$LIBINPUT_QUIRKS"; then
+        pass "palm & thumb rejection thresholds configured in libinput quirks"
+    else
+        warn "palm rejection threshold missing from $LIBINPUT_QUIRKS"
+    fi
+    if command -v libinput &>/dev/null; then
+        if libinput quirks validate &>/dev/null; then
+            pass "libinput quirks syntax validated successfully"
+        else
+            warn "libinput quirks validation failed for $LIBINPUT_QUIRKS"
+        fi
+    fi
+else
+    fail "libinput hardware quirks missing: $LIBINPUT_QUIRKS (DWT and palm rejection will fail on Wayland)"
+    info "Fix: run macbook_hardware_fixer.sh (step 8 creates $LIBINPUT_QUIRKS)"
+fi
+
 LIBINPUT_CONF="/usr/share/X11/xorg.conf.d/40-macbook-libinput.conf"
 if [ -f "$LIBINPUT_CONF" ]; then
     pass "X11 libinput config present: $LIBINPUT_CONF"
